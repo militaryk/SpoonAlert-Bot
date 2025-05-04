@@ -1,0 +1,6 @@
+{
+  "discordToken": "@@DISCORD_TOKEN_ENV@@",
+  "channelId": "@@DISCORD_CHANNEL_ID_ENV@@",
+  "playersJsonUrl": "http://your-server/tiles/players.json",
+  "pollIntervalSeconds": 30
+}
