@@ -19,8 +19,8 @@ Easily manage your watchlist and notification preferences with slash commands.
 ### 1. Clone the Repository
 
 ```sh
-git clone https://github.com/yourusername/SpoonAlert.git
-cd SpoonAlert
+git clone https://github.com/militaryk/SpoonAlert-Bot
+cd SpoonAlert-Bot
 ```
 
 ### 2. Install Dependencies
