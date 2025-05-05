@@ -164,9 +164,9 @@ const commands = [
     // --- admin commands ---
     new SlashCommandBuilder()
         .setName('admin-server-add')
-        .setDescription('Add a new Minecraft server (admin only). The URL must be the full URL to your /tiles/players.json file.')
+        .setDescription('Add a new Minecraft server (admin only)')
         .addStringOption(opt => opt.setName('name').setDescription('Server name').setRequired(true))
-        .addStringOption(opt => opt.setName('url').setDescription('players.json URL (must be the full URL to /tiles/players.json)').setRequired(true))
+        .addStringOption(opt => opt.setName('url').setDescription('players.json URL (full /tiles/players.json URL)').setRequired(true))
         .setDefaultMemberPermissions('0')
         .setDMPermission(false),
     new SlashCommandBuilder()
