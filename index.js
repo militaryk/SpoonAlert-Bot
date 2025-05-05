@@ -164,9 +164,9 @@ const commands = [
     // --- admin commands ---
     new SlashCommandBuilder()
         .setName('admin-server-add')
-        .setDescription('Add a new Minecraft server (admin only)')
+        .setDescription('Add a new Minecraft server (admin only). The URL must be the full URL to your /tiles/players.json file.')
         .addStringOption(opt => opt.setName('name').setDescription('Server name').setRequired(true))
-        .addStringOption(opt => opt.setName('url').setDescription('players.json URL').setRequired(true))
+        .addStringOption(opt => opt.setName('url').setDescription('players.json URL (must be the full URL to /tiles/players.json)').setRequired(true))
         .setDefaultMemberPermissions('0')
         .setDMPermission(false),
     new SlashCommandBuilder()
@@ -644,8 +644,8 @@ function cleanupAfkAlerts() {
         if (Object.keys(afkAlerts[uid]).length === 0) {
             delete afkAlerts[uid];
             changed = true;
-            // Disable detection when AFK alert time has expired and no more AFK alerts remain
-            if (userConfigs[uid]) {
+            // Only disable detection if persistentDetection is false
+            if (userConfigs[uid] && !userConfigs[uid].persistentDetection) {
                 userConfigs[uid].detection = false;
                 saveUserConfigs();
                 // Notify user that AFK alert expired and detection is now disabled

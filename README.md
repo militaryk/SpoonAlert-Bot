@@ -76,7 +76,7 @@ Edit `config.json` to set your Minecraft servers and polling intervals:
 }
 ```
 
-- `servers`: List of Minecraft servers to monitor. Each must have a `name` and a `url` to its `players.json`.
+- `servers`: List of Minecraft servers to monitor. Each must have a `name` and a `url` to its `players.json` (the full URL to `/tiles/players.json` from your Squaremap install).
 - `pollIntervalOnlineSeconds`: How often (in seconds) to check for player status when any tracked player is online (default: 30).
 - `pollIntervalOfflineSeconds`: How often (in seconds) to check when no tracked players are online (default: 30).
 - `loggingEnabled`: Set to `true` to enable console logging for bot actions.
@@ -114,7 +114,7 @@ All commands are available as Discord slash commands:
 | `/afk-alert <hours>`   | Enable AFK disconnect alert for your player for a set number of hours. |
 | `/server-list`         | List all configured Minecraft servers.           |
 | `/help`                | Show help and command documentation.             |
-| `/admin-server-add`    | Add a new Minecraft server (admin only).         |
+| `/admin-server-add`    | Add a new Minecraft server (admin only). **The URL must be the full URL to your `/tiles/players.json` file.** |
 | `/admin-server-remove` | Remove a Minecraft server (admin only).          |
 | `/admin-role-add`      | Add a role to the admin list (super admin only). |
 | `/admin-role-remove`   | Remove a role from the admin list (super admin only). |

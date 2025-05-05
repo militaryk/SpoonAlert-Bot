@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 1.1.1
+
+### Hotfix
+
+- Fixed: AFK alert expiry will no longer disable detection if persistent detection is enabled (`persistentDetection: true`).  
+- Clarified `/admin-server-add` command and README to specify the URL must be the full URL to `/tiles/players.json`.
+
 ## Version 1.1
 
 ### Features & Improvements
