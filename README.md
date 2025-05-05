@@ -5,16 +5,31 @@ Easily manage your watchlist and notification preferences with slash commands.
 
 ---
 
-## Features
-
-- **Player Disconnect Alerts:** Get notified when tracked players leave the server.
-- **Death Notifications:** Receive alerts when a tracked player dies.
-- **Custom Watchlist:** Add or remove Minecraft players to monitor.
-- **Easy Setup:** Configure via environment variables or config file.
+[**View the full Changelog**](./CHANGELOG.md)
 
 ---
 
-## Installation & Setup
+## ⚠️ Disclaimer
+
+```
+IMPORTANT: SpoonAlert relies on the Squaremap API for player status.
+If a player dies, goes invisible, or wears a pumpkin, Squaremap may remove them from the map.
+This will trigger a disconnect alert from the bot, even if the player is still online.
+```
+
+---
+
+## Features
+
+- **Player Disconnect Alerts:** Get notified when your tracked player leaves the server.
+- **AFK Alerts:** Temporarily enable disconnect alerts for a set time.
+- **Easy Setup:** Configure via environment variables and `config.json`.
+- **Multi-server Support:** Monitor players across multiple Minecraft servers.
+- **Admin Commands:** Add/remove servers and admin roles via Discord.
+
+---
+
+## How to Setup the Bot
 
 ### 1. Clone the Repository
 
@@ -25,15 +40,9 @@ cd SpoonAlert-Bot
 
 ### 2. Install Dependencies
 
-Run the following command **inside the project folder** to install all required dependencies:
-
 ```sh
 npm install
 ```
-
-> **Note:**  
-> Do **not** use `-g` or `sudo`/administrator privileges.  
-> This will create a `node_modules` folder locally with all dependencies needed to run the bot.
 
 ### 3. Configure Environment Variables
 
@@ -41,24 +50,40 @@ Create a `.env` file in the root directory:
 
 ```
 DISCORD_TOKEN=your_discord_bot_token
+ADMIN_USER_ID=your_discord_user_id
 ```
 
 - `DISCORD_TOKEN`: Your Discord bot token (get from [Discord Developer Portal](https://discord.com/developers/applications)).
+- `ADMIN_USER_ID`: Your Discord user ID (for super admin access).
 
 ### 4. Configure Bot Settings
 
-Edit `config.json` to set your Minecraft server's player status endpoint and other options:
+Edit `config.json` to set your Minecraft servers and polling intervals:
 
 ```json
 {
   "discordToken": "@@DISCORD_TOKEN_ENV@@",
   "channelId": "@@DISCORD_CHANNEL_ID_ENV@@",
-  "playersJsonUrl": "http://your-server/tiles/players.json",
-  "pollIntervalSeconds": 30
+  "servers": [
+    {
+      "name": "Your Server Name",
+      "url": "http://your-server/tiles/players.json"
+    }
+  ],
+  "pollIntervalOnlineSeconds": 30,
+  "pollIntervalOfflineSeconds": 30,
+  "loggingEnabled": true
 }
 ```
 
-- `playersJsonUrl`: URL to your Minecraft server's `players.json` endpoint.
+- `servers`: List of Minecraft servers to monitor. Each must have a `name` and a `url` to its `players.json`.
+- `pollIntervalOnlineSeconds`: How often (in seconds) to check for player status when any tracked player is online (default: 30).
+- `pollIntervalOfflineSeconds`: How often (in seconds) to check when no tracked players are online (default: 30).
+- `loggingEnabled`: Set to `true` to enable console logging for bot actions.
+
+**Note:**  
+- The `discordToken` and `channelId` fields are not used if you set the values via the `.env` file and Discord slash commands.
+- You can add multiple servers to the `servers` array for multi-server monitoring.
 
 ### 5. Run the Bot
 
@@ -80,22 +105,29 @@ All commands are available as Discord slash commands:
 
 | Command                | Description                                      |
 |------------------------|--------------------------------------------------|
-| `/addplayer <name>`    | Add a Minecraft player to your watchlist.        |
-| `/removeplayer <name>` | Remove a player from your watchlist.             |
-| `/listplayers`         | List all players you are monitoring.             |
-| `/enablealert`         | Enable disconnect notifications.                 |
-| `/disablealert`        | Disable disconnect notifications.                |
-| `/toggledeathalert`    | Toggle death notifications.                      |
-| `/statusalert`         | Show your current notification settings.         |
+| `/player-add <name>`   | Set the Minecraft player you want to monitor.    |
+| `/player-remove`       | Stop monitoring your current player.             |
+| `/alert-enable`        | Enable disconnect notifications.                 |
+| `/alert-disable`       | Disable disconnect notifications.                |
+| `/alert-status`        | Show your current notification and AFK alert status. |
+| `/alert-persistent`    | Toggle persistent detection (auto-enable detection even when offline). |
+| `/afk-alert <hours>`   | Enable AFK disconnect alert for your player for a set number of hours. |
+| `/server-list`         | List all configured Minecraft servers.           |
 | `/help`                | Show help and command documentation.             |
+| `/admin-server-add`    | Add a new Minecraft server (admin only).         |
+| `/admin-server-remove` | Remove a Minecraft server (admin only).          |
+| `/admin-role-add`      | Add a role to the admin list (super admin only). |
+| `/admin-role-remove`   | Remove a role from the admin list (super admin only). |
 
 ---
 
 ## Notes
 
 - The bot stores user/player configs in `userConfigs.json`.
+- AFK alerts are stored in `afkAlerts.json` for persistence.
 - Make sure your bot has permission to send DMs to users.
 - For multi-user support, invite the bot to your server and use the commands in the configured channel.
+- Polling intervals are controlled by `pollIntervalOnlineSeconds` and `pollIntervalOfflineSeconds` in `config.json`.
 
 ---
 
