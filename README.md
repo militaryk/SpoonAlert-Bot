@@ -9,7 +9,6 @@ Easily manage your watchlist and notification preferences with slash commands.
 
 [**View the full Changelog**](./CHANGELOG.md)
 
-
 ---
 
 ## ⚠️ Disclaimer
@@ -19,6 +18,23 @@ IMPORTANT: SpoonAlert relies on the Squaremap API for player status.
 If a player dies, goes invisible, or wears a pumpkin, Squaremap may remove them from the map.
 This will trigger a disconnect alert from the bot, even if the player is still online.
 ```
+
+---
+
+## Alert Modes Explained
+
+> **Detection Modes:**
+>
+> - **Persistent Detection:**  
+>   If enabled, disconnect alerts will always be sent for your tracked player, even if you go offline or after an AFK alert expires. Detection will not auto-disable.
+>
+> - **Non-Persistent Detection:**  
+>   If enabled, disconnect alerts are sent only while you are online or until your tracked player disconnects. Detection will auto-disable when your player is offline and you have no active AFK alerts.
+>
+> - **AFK Alert:**  
+>   Temporarily enables disconnect alerts for a set number of hours, regardless of your persistent setting.  
+>   - If persistent detection is **off**, detection will auto-disable when the AFK alert expires (and you will be notified).
+>   - If persistent detection is **on**, detection will remain enabled after the AFK alert expires.
 
 ---
 
