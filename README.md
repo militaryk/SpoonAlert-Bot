@@ -1,11 +1,14 @@
 # SpoonAlert
 
+**Current Version:** `1.1.1`
+
 SpoonAlert is a Discord bot that monitors Minecraft players on your server and sends you a DM when they disconnect or die.  
 Easily manage your watchlist and notification preferences with slash commands.
 
 ---
 
 [**View the full Changelog**](./CHANGELOG.md)
+
 
 ---
 
