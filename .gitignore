@@ -1,6 +1,8 @@
 node_modules
 .vscode
 .env
-*.json
-!config.json
+config.json
+userConfigs.json
+afkAlerts.json
+afkTracking.json
 !package.json
