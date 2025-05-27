@@ -1,5 +1,40 @@
 # Changelog
 
+## Version 1.2.0
+
+### New Features
+
+- **Player Join Alerts:** Added ability to get notified when your tracked player joins a server.
+  - New commands: `/join-enable` and `/join-disable`
+  - Join notifications are shown in `/alert-status` command
+  - Users can have join notifications enabled independently of disconnect detection
+- **AFK Detection:** Added position-based AFK detection system.
+  - New commands: `/afk-enable <minutes>` and `/afk-disable`
+  - Tracks player position changes and sends notifications when player hasn't moved for specified time (1-60 minutes)
+  - AFK status shown in `/alert-status` command
+  - Position data automatically cleaned up when players go offline or detection is disabled
+  - Persistent storage in `afkTracking.json` file
+- **Dynamic Polling Intervals:** The bot now automatically adjusts polling frequency based on player activity.
+  - When tracked players are online: polls every 30 seconds (configurable via `pollIntervalOnlineSeconds`)
+  - When no tracked players are online: polls every 2 minutes (configurable via `pollIntervalOfflineSeconds`)
+- **Enhanced Error Handling:** Improved error handling for server connection timeouts and network issues.
+  - Suppresses stack traces for common network errors (ETIMEDOUT, ECONNREFUSED, etc.)
+  - Only logs concise warning messages when servers are offline
+
+### Bug Fixes
+
+- Fixed: Bot no longer crashes when a server is offline or unreachable
+- Fixed: Improved bot stability with proper error handling in polling intervals
+- Fixed: AFK detection validation ensures minutes parameter is within valid range (1-60)
+
+### Misc
+
+- Updated README.md with new join notification and AFK detection commands
+- Added comprehensive help text for AFK detection features
+- Improved code organization and maintainability
+
+---
+
 ## Version 1.1.1
 
 ### Hotfix

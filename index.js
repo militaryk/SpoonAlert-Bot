@@ -25,6 +25,8 @@ let lastPlayerState = null;
 const USER_CONFIGS_PATH = path.join(__dirname, 'userConfigs.json');
 // Add AFK alert persistent storage path
 const AFK_ALERTS_PATH = path.join(__dirname, 'afkAlerts.json');
+// Add AFK tracking storage path
+const AFK_TRACKING_PATH = path.join(__dirname, 'afkTracking.json');
 
 // Track users and their player: { [discordUserId]: { player: {name}, ... } }
 let userConfigs = {};
@@ -54,6 +56,18 @@ function loadUserConfigs() {
                 if (!('defaultPlayer' in cfg)) {
                     cfg.defaultPlayer = null;
                 }
+                // Ensure joinNotify is present (false if missing)
+                if (typeof cfg.joinNotify !== 'boolean') {
+                    cfg.joinNotify = false;
+                }
+                // Ensure afkDetection is present (false if missing)
+                if (typeof cfg.afkDetection !== 'boolean') {
+                    cfg.afkDetection = false;
+                }
+                // Ensure afkThresholdMinutes is present (10 if missing)
+                if (typeof cfg.afkThresholdMinutes !== 'number' || cfg.afkThresholdMinutes < 1) {
+                    cfg.afkThresholdMinutes = 10;
+                }
             }
             userConfigs = parsed;
         }
@@ -73,6 +87,9 @@ function saveUserConfigs() {
                 // Save as player, not players array
                 player: cfg.player || null,
                 persistentDetection: !!cfg.persistentDetection,
+                joinNotify: !!cfg.joinNotify,
+                afkDetection: !!cfg.afkDetection,
+                afkThresholdMinutes: cfg.afkThresholdMinutes || 10,
                 defaultPlayer: cfg.defaultPlayer || null // ensure defaultPlayer is saved
             };
             delete serializable[uid].players;
@@ -85,6 +102,9 @@ function saveUserConfigs() {
 
 // Add AFK alert tracking: { [discordUserId]: { [key]: { expiresAt: timestamp } } }
 let afkAlerts = {};
+
+// Add AFK position tracking: { [discordUserId]: { [key]: { x, y, z, lastMoved: timestamp, afkDetectionEnabled: boolean, afkThresholdMinutes: number } } }
+let afkTracking = {};
 
 // Load afkAlerts from disk
 function loadAfkAlerts() {
@@ -108,9 +128,32 @@ function saveAfkAlerts() {
     }
 }
 
+// Load afkTracking from disk
+function loadAfkTracking() {
+    try {
+        if (fs.existsSync(AFK_TRACKING_PATH)) {
+            const raw = fs.readFileSync(AFK_TRACKING_PATH, 'utf8');
+            afkTracking = JSON.parse(raw);
+        }
+    } catch (e) {
+        log('Failed to load afkTracking:', e);
+        afkTracking = {};
+    }
+}
+
+// Save afkTracking to disk
+function saveAfkTracking() {
+    try {
+        fs.writeFileSync(AFK_TRACKING_PATH, JSON.stringify(afkTracking, null, 2), 'utf8');
+    } catch (e) {
+        log('Failed to save afkTracking:', e);
+    }
+}
+
 // Load configs at startup
 loadUserConfigs();
 loadAfkAlerts();
+loadAfkTracking();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages], partials: ['CHANNEL'] });
 
@@ -161,6 +204,23 @@ const commands = [
     new SlashCommandBuilder()
         .setName('alert-persistent')
         .setDescription('Toggle persistent detection (auto-enable detection even when offline)'),
+    new SlashCommandBuilder()
+        .setName('join-enable')
+        .setDescription('Enable player join notifications'),
+    new SlashCommandBuilder()
+        .setName('join-disable')
+        .setDescription('Disable player join notifications'),
+    new SlashCommandBuilder()
+        .setName('afk-enable')
+        .setDescription('Enable AFK detection for your monitored player')
+        .addIntegerOption(opt => 
+            opt.setName('minutes')
+                .setDescription('Minutes of inactivity before being marked as AFK (1-60)')
+                .setRequired(true)
+        ),
+    new SlashCommandBuilder()
+        .setName('afk-disable')
+        .setDescription('Disable AFK detection for your monitored player'),
     // --- admin commands ---
     new SlashCommandBuilder()
         .setName('admin-server-add')
@@ -268,6 +328,9 @@ client.on('interactionCreate', async interaction => {
             player: null,
             deathNotify: true,
             detection: true,
+            joinNotify: false,
+            afkDetection: false,
+            afkThresholdMinutes: 10,
             persistentDetection: false,
             wasOnline: {},
             lastState: {}
@@ -360,12 +423,12 @@ client.on('interactionCreate', async interaction => {
                     return `- ${serverDisplay}: ${group.timeStr} (ends at ${untilStr} local time)`;
                 }).join('\n');
             }
-        }
-
-        await ephemeralReply(interaction, {
+        }        await ephemeralReply(interaction, {
             content:
                 `Player disconnect detection is currently **${userCfg.detection ? 'enabled' : 'disabled'}**.\n` +
                 `Persistent detection is **${userCfg.persistentDetection ? 'enabled' : 'disabled'}**.\n` +
+                `Player join notifications are **${userCfg.joinNotify ? 'enabled' : 'disabled'}**.\n` +
+                `AFK detection is **${userCfg.afkDetection ? `enabled (${userCfg.afkThresholdMinutes} minutes)` : 'disabled'}**.\n` +
                 `Monitored player: ${list}` +
                 (afkMsg ? afkMsg : ''),
             ephemeral: true
@@ -433,8 +496,11 @@ client.on('interactionCreate', async interaction => {
                     { name: '/alert-persistent', value: 'Toggle persistent detection (auto-enable detection even when offline).' },
                     { name: '/player-add <name>', value: 'Monitor a Minecraft player.' },
                     { name: '/player-remove', value: 'Stop monitoring your player.' },
-                    { name: '/server-list', value: 'List all configured Minecraft servers.' },
-                    { name: '/afk-alert <hours>', value: 'Enable AFK disconnect alert for your player.' },
+                    { name: '/server-list', value: 'List all configured Minecraft servers.' },                    { name: '/afk-alert <hours>', value: 'Enable AFK disconnect alert for your player.' },
+                    { name: '/afk-enable <minutes>', value: 'Enable AFK detection (1-60 minutes of inactivity).' },
+                    { name: '/afk-disable', value: 'Disable AFK detection.' },
+                    { name: '/join-enable', value: 'Enable player join notifications.' },
+                    { name: '/join-disable', value: 'Disable player join notifications.' },
                     { name: '/help', value: 'Show this help message.' }
                 ],
                 footer: { text: 'Made for AFK warriors and blocky adventurers!' }
@@ -569,7 +635,6 @@ client.on('interactionCreate', async interaction => {
             msg = `AFK alert enabled for **${player}** on all servers for ${hours} hour(s). You will be notified if they disconnect within this period.`;
         }
         await ephemeralReply(interaction, { content: msg, ephemeral: true });
-        return;
     } else if (interaction.commandName === 'bot-status') {
         // Only allow super admin or admin roles
         let isAdmin = false;
@@ -618,6 +683,39 @@ client.on('interactionCreate', async interaction => {
             ephemeral: true
         });
         return;
+    } else if (interaction.commandName === 'join-enable') {
+        userCfg.joinNotify = true;
+        saveUserConfigs();
+        log(`User ${interaction.user.tag} (${discordUserId}) enabled player join notifications.`);
+        await ephemeralReply(interaction, { content: 'Player join notifications enabled.', ephemeral: true });
+    } else if (interaction.commandName === 'join-disable') {
+        userCfg.joinNotify = false;
+        saveUserConfigs();
+        log(`User ${interaction.user.tag} (${discordUserId}) disabled player join notifications.`);
+        await ephemeralReply(interaction, { content: 'Player join notifications disabled.', ephemeral: true });    } else if (interaction.commandName === 'afk-enable') {
+        if (!userCfg.player) {
+            await interaction.reply({ content: 'You are not monitoring any player. Use `/player-add` first.', ephemeral: true });
+            return;
+        }
+        const minutes = interaction.options.getInteger('minutes');
+        if (minutes < 1 || minutes > 60) {
+            await interaction.reply({ content: 'AFK threshold must be between 1 and 60 minutes.', ephemeral: true });
+            return;
+        }
+        userCfg.afkDetection = true;
+        userCfg.afkThresholdMinutes = minutes;
+        saveUserConfigs();
+        log(`User ${interaction.user.tag} (${discordUserId}) enabled AFK detection with a threshold of ${minutes} minutes.`);
+        await ephemeralReply(interaction, { content: `AFK detection enabled. You will be notified if your player is inactive for ${minutes} minutes.`, ephemeral: true });    } else if (interaction.commandName === 'afk-disable') {
+        userCfg.afkDetection = false;
+        // Clean up AFK tracking data for this user
+        if (afkTracking[discordUserId]) {
+            delete afkTracking[discordUserId];
+            saveAfkTracking();
+        }
+        saveUserConfigs();
+        log(`User ${interaction.user.tag} (${discordUserId}) disabled AFK detection.`);
+        await ephemeralReply(interaction, { content: 'AFK detection disabled and tracking data cleared.', ephemeral: true });
     }
 
     // Increment usage count for every code except bot-status itself
@@ -684,11 +782,11 @@ function startPolling(intervalMs) {
 
 async function checkPlayerStatus() {
     try {
-        let anyPlayerOnline = false;
-        // Build a map of { serverName: [{discordUserId, playerName}] }
+        let anyPlayerOnline = false;        // Build a map of { serverName: [{discordUserId, playerName}] }
         const serverMap = {};
         for (const [discordUserId, userCfg] of Object.entries(userConfigs)) {
-            if (!userCfg.detection || !userCfg.player) continue;
+            // Include users who have detection OR join notifications OR AFK detection enabled
+            if ((!userCfg.detection && !userCfg.joinNotify && !userCfg.afkDetection) || !userCfg.player) continue;
             const playerName = userCfg.player.name;
             for (const server of config.servers || []) {
                 if (!serverMap[server.name]) serverMap[server.name] = [];
@@ -737,13 +835,92 @@ async function checkPlayerStatus() {
                 if (!userCfg) continue;
                 const key = `${playerName}|${serverName}`;
                 const player = playersArr.find(p => p.name === playerName);
-                const online = !!player;
-
-                // Track if any monitored player is online
+                const online = !!player;                // Track if any monitored player is online
                 if (online) anyPlayerOnline = true;
 
-                // --- AFK Alert logic ---
+                // --- AFK Detection Position Tracking ---
+                if (userCfg.afkDetection && online && player) {
+                    if (!afkTracking[discordUserId]) afkTracking[discordUserId] = {};
+                    
+                    const afkKey = `${playerName}|${serverName}`;
+                    const currentPos = { x: player.x, y: player.y, z: player.z };
+                    const now = Date.now();
+                    
+                    if (!afkTracking[discordUserId][afkKey]) {
+                        // First time tracking this player - initialize position
+                        afkTracking[discordUserId][afkKey] = {
+                            x: currentPos.x,
+                            y: currentPos.y,
+                            z: currentPos.z,
+                            lastMoved: now,
+                            afkDetectionEnabled: true,
+                            afkThresholdMinutes: userCfg.afkThresholdMinutes
+                        };
+                        saveAfkTracking();
+                    } else {
+                        const tracked = afkTracking[discordUserId][afkKey];
+                        
+                        // Check if position has changed (with small tolerance for floating point)
+                        const tolerance = 0.1;
+                        const moved = 
+                            Math.abs(tracked.x - currentPos.x) > tolerance ||
+                            Math.abs(tracked.y - currentPos.y) > tolerance ||
+                            Math.abs(tracked.z - currentPos.z) > tolerance;
+                        
+                        if (moved) {
+                            // Player moved - update position and reset timer
+                            tracked.x = currentPos.x;
+                            tracked.y = currentPos.y;
+                            tracked.z = currentPos.z;
+                            tracked.lastMoved = now;
+                            tracked.afkThresholdMinutes = userCfg.afkThresholdMinutes; // Update threshold in case user changed it
+                            saveAfkTracking();
+                        } else {
+                            // Player hasn't moved - check if they've been AFK too long
+                            const timeSinceLastMove = now - tracked.lastMoved;
+                            const afkThresholdMs = tracked.afkThresholdMinutes * 60 * 1000;
+                            
+                            if (timeSinceLastMove >= afkThresholdMs) {
+                                // Player is AFK - send notification
+                                try {
+                                    const user = await client.users.fetch(discordUserId);
+                                    const afkMinutes = Math.floor(timeSinceLastMove / 60000);
+                                    log(`AFK detection: Player "${playerName}" has been AFK for ${afkMinutes} minutes on server "${serverName}" (user ${discordUserId}). Sending DM.`);
+                                    if (user) {
+                                        user.send(`🚨 **AFK Alert**: Player **${playerName}** has been inactive for ${afkMinutes} minutes on ${serverName}.\nLast position: X:${Math.round(tracked.x)}, Y:${Math.round(tracked.y)}, Z:${Math.round(tracked.z)}`);
+                                    }
+                                    
+                                    // Reset the timer to avoid spam notifications
+                                    tracked.lastMoved = now;
+                                    saveAfkTracking();
+                                } catch (error) {
+                                    log('Error sending AFK notification:', error);
+                                }
+                            }
+                        }
+                    }
+                } else if (!online && afkTracking[discordUserId]) {
+                    // Player went offline - clean up their AFK tracking
+                    const afkKey = `${playerName}|${serverName}`;
+                    if (afkTracking[discordUserId][afkKey]) {
+                        delete afkTracking[discordUserId][afkKey];
+                        if (Object.keys(afkTracking[discordUserId]).length === 0) {
+                            delete afkTracking[discordUserId];
+                        }
+                        saveAfkTracking();
+                    }
+                }
+
+                // --- Player join alert logic ---
+                if (userCfg.joinNotify && userCfg.wasOnline && !userCfg.wasOnline[key] && online) {
+                    const user = await client.users.fetch(discordUserId);
+                    log(`Join alert: Player "${playerName}" joined server "${serverName}" (user ${discordUserId}). Sending DM.`);
+                    if (user) {
+                        user.send(`Player **${playerName}** has joined the server (${serverName}).`);
+                    }
+                }// --- AFK Alert logic ---
                 if (
+                    userCfg.detection &&
                     afkAlerts[discordUserId] &&
                     afkAlerts[discordUserId][key] &&
                     userCfg.wasOnline &&
@@ -760,7 +937,7 @@ async function checkPlayerStatus() {
                 }
 
                 // ...existing code for normal disconnect alert...
-                if (userCfg.wasOnline && userCfg.wasOnline[key] && !online) {
+                if (userCfg.detection && userCfg.wasOnline && userCfg.wasOnline[key] && !online) {
                     const user = await client.users.fetch(discordUserId);
                     log(`Disconnect alert: Player "${playerName}" disconnected from server "${serverName}" (user ${discordUserId}). Sending DM.`);
                     if (user) {

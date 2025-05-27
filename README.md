@@ -1,8 +1,8 @@
 # SpoonAlert
 
-**Current Version:** `1.1.1`
+**Current Version:** `1.2.0`
 
-SpoonAlert is a Discord bot that monitors Minecraft players on your server and sends you a DM when they disconnect or die.  
+SpoonAlert is a Discord bot that monitors Minecraft players on your server and sends you a DM when they disconnect, die, or join.  
 Easily manage your watchlist and notification preferences with slash commands.
 
 ---
@@ -41,6 +41,8 @@ This will trigger a disconnect alert from the bot, even if the player is still o
 ## Features
 
 - **Player Disconnect Alerts:** Get notified when your tracked player leaves the server.
+- **Player Join Alerts:** Get notified when your tracked player joins the server.
+- **AFK Detection:** Get notified when your player hasn't moved for a specified time period.
 - **AFK Alerts:** Temporarily enable disconnect alerts for a set time.
 - **Easy Setup:** Configure via environment variables and `config.json`.
 - **Multi-server Support:** Monitor players across multiple Minecraft servers.
@@ -77,7 +79,14 @@ ADMIN_USER_ID=your_discord_user_id
 
 ### 4. Configure Bot Settings
 
-Edit `config.json` to set your Minecraft servers and polling intervals:
+Copy the template files and configure them:
+
+```sh
+cp config.json.template config.json
+cp userConfigs.json.template userConfigs.json
+```
+
+Then edit `config.json` to set your Minecraft servers and polling intervals:
 
 ```json
 {
@@ -90,19 +99,20 @@ Edit `config.json` to set your Minecraft servers and polling intervals:
     }
   ],
   "pollIntervalOnlineSeconds": 30,
-  "pollIntervalOfflineSeconds": 30,
+  "pollIntervalOfflineSeconds": 120,
   "loggingEnabled": true
 }
 ```
 
 - `servers`: List of Minecraft servers to monitor. Each must have a `name` and a `url` to its `players.json` (the full URL to `/tiles/players.json` from your Squaremap install).
 - `pollIntervalOnlineSeconds`: How often (in seconds) to check for player status when any tracked player is online (default: 30).
-- `pollIntervalOfflineSeconds`: How often (in seconds) to check when no tracked players are online (default: 30).
+- `pollIntervalOfflineSeconds`: How often (in seconds) to check when no tracked players are online (default: 120).
 - `loggingEnabled`: Set to `true` to enable console logging for bot actions.
 
 **Note:**  
 - The `discordToken` and `channelId` fields are not used if you set the values via the `.env` file and Discord slash commands.
 - You can add multiple servers to the `servers` array for multi-server monitoring.
+- `userConfigs.json` will be automatically populated as users interact with the bot.
 
 ### 5. Run the Bot
 
@@ -131,6 +141,10 @@ All commands are available as Discord slash commands:
 | `/alert-status`        | Show your current notification and AFK alert status. |
 | `/alert-persistent`    | Toggle persistent detection (auto-enable detection even when offline). |
 | `/afk-alert <hours>`   | Enable AFK disconnect alert for your player for a set number of hours. |
+| `/afk-enable <minutes>`| Enable AFK detection (1-60 minutes of inactivity). |
+| `/afk-disable`         | Disable AFK detection.                          |
+| `/join-enable`         | Enable player join notifications.                |
+| `/join-disable`        | Disable player join notifications.               |
 | `/server-list`         | List all configured Minecraft servers.           |
 | `/help`                | Show help and command documentation.             |
 | `/admin-server-add`    | Add a new Minecraft server (admin only). **The URL must be the full URL to your `/tiles/players.json` file.** |
@@ -142,8 +156,11 @@ All commands are available as Discord slash commands:
 
 ## Notes
 
-- The bot stores user/player configs in `userConfigs.json`.
+- The bot stores user/player configs in `userConfigs.json` (created from template).
+- Configuration is stored in `config.json` (created from template).
 - AFK alerts are stored in `afkAlerts.json` for persistence.
+- AFK tracking data is stored in `afkTracking.json` for position monitoring.
+- Template files (`*.template`) are provided for initial setup.
 - Make sure your bot has permission to send DMs to users.
 - For multi-user support, invite the bot to your server and use the commands in the configured channel.
 - Polling intervals are controlled by `pollIntervalOnlineSeconds` and `pollIntervalOfflineSeconds` in `config.json`.
