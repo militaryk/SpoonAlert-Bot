@@ -1,0 +1,116 @@
+name: Deploy
+
+# A restart IS the deploy: the Pterodactyl Node.js egg runs `git pull` and
+# `npm install` on boot, so all this workflow has to do is prove the code is
+# healthy and then ask the panel to restart the server.
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+    workflow_dispatch: # deploy by hand from the Actions tab
+
+concurrency:
+    # A second push supersedes one already in flight rather than queueing
+    # another restart behind it.
+    group: deploy-${{ github.ref }}
+    cancel-in-progress: true
+
+permissions:
+    contents: read
+
+jobs:
+    test:
+        name: Test
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                # 18 is the floor declared in package.json engines; 22 is what
+                # development happens on. Testing both means a change that only
+                # works on the newer runtime cannot reach the server unnoticed.
+                node-version: ['18', '22']
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: ${{ matrix.node-version }}
+                  cache: npm
+
+            - run: npm ci
+
+            # 98 tests, no network and no Discord token required.
+            - run: npm test
+
+            - run: npm run lint
+
+            - run: npm run format:check
+
+    deploy:
+        name: Deploy to Pterodactyl
+        needs: test # red tests => no restart, the bot keeps running the old code
+        if: github.event_name != 'pull_request'
+        runs-on: ubuntu-latest
+        steps:
+            - name: Check deploy secrets are present
+              env:
+                  PANEL: ${{ secrets.PTERO_PANEL_URL }}
+                  SERVER: ${{ secrets.PTERO_SERVER_ID }}
+                  KEY: ${{ secrets.PTERO_API_KEY }}
+              run: |
+                  missing=""
+                  [ -n "$PANEL" ]  || missing="$missing PTERO_PANEL_URL"
+                  [ -n "$SERVER" ] || missing="$missing PTERO_SERVER_ID"
+                  [ -n "$KEY" ]    || missing="$missing PTERO_API_KEY"
+                  if [ -n "$missing" ]; then
+                    echo "::error::Missing repository secret(s):$missing"
+                    echo "Set them with: gh secret set <NAME>   (see README, Deployment)"
+                    exit 1
+                  fi
+
+            - name: Restart server (pulls and installs on boot)
+              env:
+                  PANEL: ${{ secrets.PTERO_PANEL_URL }}
+                  SERVER: ${{ secrets.PTERO_SERVER_ID }}
+                  KEY: ${{ secrets.PTERO_API_KEY }}
+              run: |
+                  # --fail-with-body turns a 401/404 into a red build carrying the
+                  # panel's own error message, instead of passing silently.
+                  curl -sS --fail-with-body -X POST \
+                    "${PANEL%/}/api/client/servers/${SERVER}/power" \
+                    -H "Authorization: Bearer ${KEY}" \
+                    -H "Content-Type: application/json" \
+                    -H "Accept: application/vnd.pterodactyl.v1+json" \
+                    -d '{"signal":"restart"}'
+                  echo "Restart requested."
+
+            - name: Confirm the bot came back up
+              env:
+                  PANEL: ${{ secrets.PTERO_PANEL_URL }}
+                  SERVER: ${{ secrets.PTERO_SERVER_ID }}
+                  KEY: ${{ secrets.PTERO_API_KEY }}
+              run: |
+                  # Without this a deploy that boots straight into a crash loop
+                  # still shows a green tick. Poll rather than sleeping a fixed
+                  # time, because `npm install` on boot is not instant.
+                  for attempt in $(seq 1 20); do
+                    sleep 10
+                    state=$(curl -sS \
+                      "${PANEL%/}/api/client/servers/${SERVER}/resources" \
+                      -H "Authorization: Bearer ${KEY}" \
+                      -H "Accept: application/vnd.pterodactyl.v1+json" \
+                      | jq -r '.attributes.current_state // "unknown"')
+                    echo "attempt ${attempt}: ${state}"
+                    if [ "$state" = "running" ]; then
+                      echo "Deployed and running."
+                      exit 0
+                    fi
+                    if [ "$state" = "offline" ] && [ "$attempt" -gt 6 ]; then
+                      echo "::error::Server went offline instead of starting - check the panel console."
+                      exit 1
+                    fi
+                  done
+                  echo "::error::Server never reached 'running' (last state: ${state})."
+                  exit 1

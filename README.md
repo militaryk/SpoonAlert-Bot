@@ -181,6 +181,64 @@ npm run lint      # eslint
 npm run format    # prettier
 ```
 
+The tests need neither a Discord token nor network access — `SPOONALERT_CONFIG` points them at
+a fixture and `SPOONALERT_STATE_DIR` sends any state writes to a temp directory, so they never
+touch real user data.
+
+---
+
+## Deployment (Pterodactyl, automatic)
+
+Every push to `main` runs the tests and, if they pass, restarts the Pterodactyl server.
+**A restart is the deploy** — the Node.js egg's startup command already does the work:
+
+```sh
+if [[ -d .git ]] && [[ {{AUTO_UPDATE}} == "1" ]]; then git pull; fi;
+if [ -f /home/container/package.json ]; then npm install; fi; node index.js
+```
+
+So the CI job ([`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)) only has to
+prove the code is healthy and then ask the panel to restart, and finally poll until the server
+reports `running` — without that last check, a deploy that boots into a crash loop would still
+show a green tick.
+
+### One-time server setup
+
+On the **Startup** tab set:
+
+| Variable | Value |
+|---|---|
+| `Git Repo Address` | `https://github.com/militaryk/SpoonAlert-Bot` |
+| `Branch` | `main` |
+| `AUTO_UPDATE` | `1` |
+| `User Uploaded Files` | `0` |
+
+> ⚠️ **`AUTO_UPDATE` only works if `/home/container/.git` exists.** If the files were uploaded
+> by hand rather than cloned, the `[[ -d .git ]]` test fails, `git pull` never runs, and the
+> bot boots the old code **with no error shown**. To convert an existing manual install:
+> back up `.env`, `config.json`, `userConfigs.json`, `afkAlerts.json` and `afkTracking.json`,
+> stop the server, delete everything in `/home/container`, hit **Reinstall Server** (the
+> install script refuses to clone into a non-empty non-git directory), then re-upload those
+> five files.
+
+### Repository secrets
+
+Create a Client API key under **Account → API Credentials**, then:
+
+```sh
+gh secret set PTERO_PANEL_URL   # https://panel.example.com  (no trailing slash)
+gh secret set PTERO_SERVER_ID   # the short hash from /server/<id>
+gh secret set PTERO_API_KEY     # the key you just created
+```
+
+The deploy job fails with a named error if any of the three is missing.
+
+### What a deploy never touches
+
+`.env`, `config.json`, `userConfigs.json`, `afkAlerts.json` and `afkTracking.json` are all
+gitignored, so they live only on the server and survive every pull. This is exactly why the
+pipeline uses git rather than an SFTP mirror — a mirror with `--delete` would wipe them.
+
 ---
 
 ## Hosting
