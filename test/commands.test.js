@@ -27,8 +27,10 @@ const EXPECTED = {
         { name: 'url', type: 3, required: true }
     ],
     'admin-server-remove': [{ name: 'name', type: 3, required: true }],
-    'admin-role-add': [{ name: 'rolename', type: 3, required: true }],
-    'admin-role-remove': [{ name: 'rolename', type: 3, required: true }],
+    // type 8 = ROLE. These took a free-text role NAME until admin access moved
+    // to role IDs; a role option hands back a real snowflake instead.
+    'admin-role-add': [{ name: 'role', type: 8, required: true }],
+    'admin-role-remove': [{ name: 'role', type: 8, required: true }],
     'bot-status': []
 };
 
@@ -77,19 +79,32 @@ test('every command has a description and an executable handler', () => {
 });
 
 test('admin commands are guild-only and hidden by default', () => {
-    // setDefaultMemberPermissions('0') + setDMPermission(false) keeps them out
-    // of DMs and off the default member permission set.
-    for (const name of [
-        'admin-server-add',
-        'admin-server-remove',
-        'admin-role-add',
-        'admin-role-remove',
-        'bot-status'
-    ]) {
+    // setDefaultMemberPermissions('0') keeps them off the default member
+    // permission set; setContexts(Guild) -- contexts [0] -- replaces the
+    // deprecated setDMPermission(false) and keeps them out of DMs.
+    for (const name of commands.ADMIN_COMMAND_NAMES) {
         const payload = commands.get(name).data.toJSON();
         assert.equal(payload.default_member_permissions, '0', `/${name} default permissions`);
-        assert.equal(payload.dm_permission, false, `/${name} is not usable in DMs`);
+        assert.deepEqual(payload.contexts, [0], `/${name} is guild-only`);
     }
+});
+
+test('the admin command set is exactly what registration scopes to a guild', () => {
+    assert.deepEqual([...commands.ADMIN_COMMAND_NAMES].sort(), [
+        'admin-role-add',
+        'admin-role-remove',
+        'admin-server-add',
+        'admin-server-remove',
+        'bot-status'
+    ]);
+});
+
+test('admin commands can be withheld from non-admin guilds', () => {
+    const general = commands.toJSON({ includeAdmin: false }).map(c => c.name);
+    assert.deepEqual(general.sort(), ['help', 'spoon']);
+
+    const all = commands.toJSON().map(c => c.name);
+    assert.equal(all.length, 7);
 });
 
 test('get() returns undefined for an unknown command', () => {

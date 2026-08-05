@@ -25,13 +25,23 @@ for (const command of [...spoon, ...admin, ...help]) {
     registry.set(command.data.name, command);
 }
 
-/** JSON payload for the Discord command-registration API. */
-function toJSON() {
-    return [...registry.values()].map(command => command.data.toJSON());
+// Derived from the module itself, so it cannot drift from what admin.js exports.
+const ADMIN_COMMAND_NAMES = new Set(admin.map(command => command.data.name));
+
+/**
+ * JSON payload for the Discord command-registration API.
+ *
+ * With ADMIN_GUILD_ID set, the admin commands are registered only into that
+ * one guild, so they are not even visible anywhere else.
+ */
+function toJSON({ includeAdmin = true } = {}) {
+    return [...registry.values()]
+        .filter(command => includeAdmin || !ADMIN_COMMAND_NAMES.has(command.data.name))
+        .map(command => command.data.toJSON());
 }
 
 function get(name) {
     return registry.get(name);
 }
 
-module.exports = { registry, get, toJSON };
+module.exports = { registry, get, toJSON, ADMIN_COMMAND_NAMES };

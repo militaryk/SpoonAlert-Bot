@@ -2,8 +2,9 @@
 
 const { REST, Routes } = require('discord.js');
 
-const { discordToken, log, logError, POLL_ONLINE_MS } = require('./src/config');
-const { loadAll, getUserConfig } = require('./src/store');
+const { discordToken, log, logError, POLL_ONLINE_MS, ADMIN_GUILD_ID } = require('./src/config');
+const { loadAll, getUserConfig, pruneOrphanedState } = require('./src/store');
+const { reportAdminSetup } = require('./src/permissions');
 const { client } = require('./src/discord/client');
 const { startPresenceRotation } = require('./src/discord/presence');
 const { checkPlayerStatus, startPolling } = require('./src/poller');
@@ -19,6 +20,10 @@ process.on('unhandledRejection', err => {
 });
 
 loadAll();
+// Drop keys left behind by removed servers or players nobody watches any more,
+// which would otherwise be re-parsed on every startup forever.
+pruneOrphanedState();
+reportAdminSetup();
 
 client.once('ready', async () => {
     log(`Logged in as ${client.user.tag}`);
@@ -31,8 +36,13 @@ client.once('ready', async () => {
     startPolling(POLL_ONLINE_MS);
 
     const rest = new REST({ version: '10' }).setToken(discordToken);
-    const body = commands.toJSON();
+    // When pinned to an admin guild, everyone else gets the user-facing
+    // commands only -- the admin ones are not even visible elsewhere.
+    const generalBody = commands.toJSON({ includeAdmin: !ADMIN_GUILD_ID });
+    const adminBody = commands.toJSON();
+
     for (const guildId of client.guilds.cache.map(guild => guild.id)) {
+        const body = ADMIN_GUILD_ID && guildId === ADMIN_GUILD_ID ? adminBody : generalBody;
         try {
             await rest.put(Routes.applicationGuildCommands(client.user.id, guildId), { body });
         } catch (err) {
@@ -73,7 +83,9 @@ async function handleSlashCommand(interaction) {
     }
 
     const userId = interaction.user.id;
-    const userCfg = getUserConfig(userId);
+    // Read-only commands get defaults without creating a stored record, so
+    // /help no longer mints a permanent entry for everyone who runs it.
+    const userCfg = getUserConfig(userId, { persist: !command.readOnly });
 
     // Counted before dispatch so commands that return early are counted too.
     if (interaction.commandName !== 'bot-status') {

@@ -1,21 +1,41 @@
 'use strict';
 
-const { SlashCommandBuilder } = require('discord.js');
+const { SlashCommandBuilder, InteractionContextType } = require('discord.js');
 
-const { config, servers, log } = require('../config');
-const { store, saveUserConfigs, saveConfig } = require('../store');
+const { config, servers, log, ALLOWED_SERVER_HOSTS } = require('../config');
+const { store, saveUserConfigs, saveConfig, pruneOrphanedState } = require('../store');
 const { isAdmin, isSuperAdmin, addAdminRole, removeAdminRole } = require('../permissions');
 const { formatUptime } = require('../lib/time');
 const { BOT_VERSION, BOT_START_TIME, getUsageCount } = require('../stats');
 const { ephemeralReply } = require('../ui/reply');
 
-/** Reject anything that is not an absolute http(s) URL. */
-function isValidServerUrl(url) {
+/**
+ * Validate a candidate players.json URL.
+ *
+ * Whatever is accepted here gets fetched from the bot host every 30 seconds
+ * forever, so this is the SSRF boundary. The host allowlist is opt-in via
+ * ALLOWED_SERVER_HOSTS: a blanket private-IP block would reject the LAN
+ * address most self-hosted Squaremap installs actually use.
+ */
+function validateServerUrl(url) {
+    let parsed;
     try {
-        return /^https?:$/.test(new URL(url).protocol);
+        parsed = new URL(url);
     } catch {
-        return false;
+        return { ok: false, reason: 'That is not a valid URL.' };
     }
+    if (!/^https?:$/.test(parsed.protocol)) {
+        return { ok: false, reason: 'The URL must start with `http://` or `https://`.' };
+    }
+    if (ALLOWED_SERVER_HOSTS.length > 0 && !ALLOWED_SERVER_HOSTS.includes(parsed.hostname.toLowerCase())) {
+        return {
+            ok: false,
+            reason:
+                `\`${parsed.hostname}\` is not in this bot's allowed server hosts. ` +
+                'Ask the bot owner to add it to `ALLOWED_SERVER_HOSTS`.'
+        };
+    }
+    return { ok: true };
 }
 
 /** Admin actions are worth a log line naming who did what, and where. */
@@ -36,7 +56,7 @@ module.exports = [
                     .setRequired(true)
             )
             .setDefaultMemberPermissions('0')
-            .setDMPermission(false),
+            .setContexts(InteractionContextType.Guild),
         async execute(interaction) {
             if (!isAdmin(interaction)) {
                 await ephemeralReply(interaction, 'You do not have permission to add servers.');
@@ -46,11 +66,9 @@ module.exports = [
             const name = interaction.options.getString('name');
             const url = interaction.options.getString('url');
 
-            if (!isValidServerUrl(url)) {
-                await ephemeralReply(
-                    interaction,
-                    'Invalid URL. Please provide a valid absolute URL starting with http:// or https://'
-                );
+            const check = validateServerUrl(url);
+            if (!check.ok) {
+                await ephemeralReply(interaction, check.reason);
                 return;
             }
             if (!config.servers) config.servers = [];
@@ -83,7 +101,7 @@ module.exports = [
                 opt.setName('name').setDescription('Server name to remove').setRequired(true)
             )
             .setDefaultMemberPermissions('0')
-            .setDMPermission(false),
+            .setContexts(InteractionContextType.Guild),
         async execute(interaction) {
             if (!isAdmin(interaction)) {
                 await ephemeralReply(interaction, 'You do not have permission to remove servers.');
@@ -120,6 +138,9 @@ module.exports = [
                 }
             }
             saveUserConfigs();
+            // Alerts and position history keyed to the removed server can never
+            // be matched by a poll again.
+            pruneOrphanedState();
 
             logAdmin(interaction, `removed server "${name}"`);
             await ephemeralReply(
@@ -131,47 +152,66 @@ module.exports = [
     {
         data: new SlashCommandBuilder()
             .setName('admin-role-add')
-            .setDescription('Add a role to the admin list (super admin only)')
-            .addStringOption(opt =>
-                opt.setName('rolename').setDescription('Role name to add as admin').setRequired(true)
+            .setDescription('Grant a role admin access (super admin only)')
+            .addRoleOption(opt =>
+                opt.setName('role').setDescription('Role to grant admin access').setRequired(true)
             )
             .setDefaultMemberPermissions('0')
-            .setDMPermission(false),
+            .setContexts(InteractionContextType.Guild),
         async execute(interaction) {
             if (!isSuperAdmin(interaction)) {
                 await ephemeralReply(interaction, 'Only the super admin can add admin roles.');
                 return;
             }
-            const rolename = interaction.options.getString('rolename');
-            if (addAdminRole(rolename)) {
-                logAdmin(interaction, `added admin role "${rolename}"`);
-                await ephemeralReply(interaction, `Role **${rolename}** added to admin list.`);
-            } else {
-                await ephemeralReply(interaction, `Role **${rolename}** is already in the admin list.`);
+            // A role option hands back a real snowflake, so there is no way to
+            // typo a name into granting access to the wrong role.
+            const role = interaction.options.getRole('role');
+            if (!addAdminRole(role.id)) {
+                await ephemeralReply(interaction, `**${role.name}** already has admin access.`);
+                return;
             }
+            if (!saveConfig()) {
+                removeAdminRole(role.id);
+                await ephemeralReply(
+                    interaction,
+                    'Could not write config.json, so the change was not applied.'
+                );
+                return;
+            }
+            logAdmin(interaction, `granted admin to role "${role.name}" (${role.id})`);
+            await ephemeralReply(interaction, `**${role.name}** now has admin access.`);
         }
     },
     {
         data: new SlashCommandBuilder()
             .setName('admin-role-remove')
-            .setDescription('Remove a role from the admin list (super admin only)')
-            .addStringOption(opt =>
-                opt.setName('rolename').setDescription('Role name to remove from admin').setRequired(true)
+            .setDescription('Revoke a role’s admin access (super admin only)')
+            .addRoleOption(opt =>
+                opt.setName('role').setDescription('Role to revoke admin access from').setRequired(true)
             )
             .setDefaultMemberPermissions('0')
-            .setDMPermission(false),
+            .setContexts(InteractionContextType.Guild),
         async execute(interaction) {
             if (!isSuperAdmin(interaction)) {
                 await ephemeralReply(interaction, 'Only the super admin can remove admin roles.');
                 return;
             }
-            const rolename = interaction.options.getString('rolename');
-            if (removeAdminRole(rolename)) {
-                logAdmin(interaction, `removed admin role "${rolename}"`);
-                await ephemeralReply(interaction, `Role **${rolename}** removed from admin list.`);
-            } else {
-                await ephemeralReply(interaction, `Role **${rolename}** is not in the admin list.`);
+            const role = interaction.options.getRole('role');
+            if (!removeAdminRole(role.id)) {
+                await ephemeralReply(interaction, `**${role.name}** does not have admin access.`);
+                return;
             }
+            // Revocation must not fail open the way the in-memory list did.
+            if (!saveConfig()) {
+                addAdminRole(role.id);
+                await ephemeralReply(
+                    interaction,
+                    'Could not write config.json, so admin access was NOT revoked.'
+                );
+                return;
+            }
+            logAdmin(interaction, `revoked admin from role "${role.name}" (${role.id})`);
+            await ephemeralReply(interaction, `**${role.name}** no longer has admin access.`);
         }
     },
     {
@@ -179,7 +219,8 @@ module.exports = [
             .setName('bot-status')
             .setDescription('Show bot version, uptime, server list, and usage stats (admin only)')
             .setDefaultMemberPermissions('0')
-            .setDMPermission(false),
+            .setContexts(InteractionContextType.Guild),
+        readOnly: true,
         async execute(interaction) {
             if (!isAdmin(interaction)) {
                 await ephemeralReply(interaction, 'You do not have permission to use this command.');

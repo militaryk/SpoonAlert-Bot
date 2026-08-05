@@ -35,6 +35,19 @@ try {
 const discordToken = process.env.DISCORD_TOKEN;
 const ENV_ADMIN_USER_ID = process.env.ADMIN_USER_ID;
 
+// Optional. When set, admin commands are registered only into this guild and
+// the admin check refuses to grant access anywhere else.
+const ADMIN_GUILD_ID = process.env.ADMIN_GUILD_ID || null;
+
+// Optional SSRF allowlist for /admin-server-add, as a comma-separated list of
+// hostnames. Left unset the old behaviour stands (any http/https URL), because
+// a self-hosted Squaremap is usually on a LAN address that a blanket
+// private-IP block would wrongly reject.
+const ALLOWED_SERVER_HOSTS = (process.env.ALLOWED_SERVER_HOSTS || '')
+    .split(',')
+    .map(h => h.trim().toLowerCase())
+    .filter(Boolean);
+
 // Fail fast on missing credentials. An unset ADMIN_USER_ID is especially nasty:
 // `interaction.user.id !== undefined` is always true, so the role commands
 // silently reject everyone, including the owner, with no hint of the cause.
@@ -82,6 +95,8 @@ module.exports = {
     logError,
     discordToken,
     ENV_ADMIN_USER_ID,
+    ADMIN_GUILD_ID,
+    ALLOWED_SERVER_HOSTS,
     CONFIG_PATH,
     USER_CONFIGS_PATH,
     AFK_ALERTS_PATH,

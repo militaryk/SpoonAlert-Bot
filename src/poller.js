@@ -1,7 +1,5 @@
 'use strict';
 
-const fetch = require('node-fetch');
-
 const { servers, log, logError, POLL_ONLINE_MS, POLL_OFFLINE_MS } = require('./config');
 const { store, saveUserConfigs, saveAfkAlerts, saveAfkTracking } = require('./store');
 const { hasMoved, hasActiveAlert, pruneExpiredAlerts } = require('./lib/afk');
@@ -18,8 +16,22 @@ let currentPollIntervalMs = null;
 // Guards against overlapping ticks. A server that accepts the connection and
 // then stalls used to park an await forever while the interval kept starting
 // fresh runs on top of it; when the host recovered they all completed at once,
-// each reading the same pre-update wasOnline and each firing a duplicate DM.
+// each reading the same pre-update presence and each firing a duplicate DM.
 let pollInProgress = false;
+
+/**
+ * "player|server" -> was this player online at the previous poll?
+ *
+ * Deliberately in-memory. This used to live in userConfigs and was written on
+ * every poll but only saved incidentally, which caused two bugs: a stale `true`
+ * survived a restart or an /alert-disable and then looked exactly like a player
+ * who had just disconnected, and a missing entry was falsy, so "never observed"
+ * was indistinguishable from "was offline" and produced a fake join alert.
+ *
+ * An empty map at startup is correct: the first observation of any key only
+ * seeds it, and alerts start from the second poll onwards.
+ */
+const lastSeenOnline = new Map();
 
 /** Expire timed AFK alerts and tell anyone whose last one just ran out. */
 function cleanupAfkAlerts() {
@@ -40,30 +52,55 @@ function cleanupAfkAlerts() {
     if (changed) saveAfkAlerts();
 }
 
-/** Is this the ordinary "server is down" case, or something worth a stack trace? */
+/**
+ * Is this the ordinary "server is down" case, or something worth a stack trace?
+ *
+ * Node's built-in fetch (undici) nests the socket error under err.cause, where
+ * node-fetch put it on the error itself -- miss that and every offline-server
+ * poll dumps a stack trace instead of one tidy line.
+ */
 function isUnreachableError(err) {
+    const code = (err.cause && err.cause.code) || err.code;
     return (
-        err.code === 'ECONNREFUSED' ||
-        err.code === 'ETIMEDOUT' ||
-        err.code === 'ENOTFOUND' ||
-        err.type === 'system' ||
-        err.type === 'request-timeout' ||
-        err.type === 'max-size' ||
-        (err.message && err.message.includes('Failed to fetch'))
+        code === 'ECONNREFUSED' ||
+        code === 'ETIMEDOUT' ||
+        code === 'ENOTFOUND' ||
+        code === 'EAI_AGAIN' ||
+        code === 'ECONNRESET' ||
+        code === 'UND_ERR_CONNECT_TIMEOUT' ||
+        code === 'UND_ERR_HEADERS_TIMEOUT' ||
+        err.name === 'AbortError' ||
+        err.name === 'TimeoutError' ||
+        (err.message && err.message.includes('fetch failed'))
     );
 }
 
 /** Fetch one server's player list, or null if it could not be read. */
 async function fetchPlayers(serverObj) {
+    // Global fetch has no timeout at all by default, which for an unattended
+    // poller means a host that stalls after the handshake parks forever.
+    const abort = AbortSignal.timeout(FETCH_TIMEOUT_MS);
     try {
-        // node-fetch defaults are timeout: 0 (wait forever) and size: 0
-        // (unbounded body) -- both are wrong for an unattended poller.
-        const res = await fetch(serverObj.url, { timeout: FETCH_TIMEOUT_MS, size: MAX_BODY_BYTES });
+        const res = await fetch(serverObj.url, { signal: abort });
         if (!res.ok) {
             log(`Server ${serverObj.url} is offline or unreachable (HTTP ${res.status}).`);
             return null;
         }
-        const data = await res.json();
+
+        // undici has no size cap either, so cap it here rather than trusting a
+        // remote host to send something sensible.
+        const declared = Number(res.headers.get('content-length'));
+        if (declared > MAX_BODY_BYTES) {
+            logError(`players.json from ${serverObj.url} is too large (${declared} bytes); skipping.`);
+            return null;
+        }
+        const body = await res.text();
+        if (body.length > MAX_BODY_BYTES) {
+            logError(`players.json from ${serverObj.url} is too large; skipping.`);
+            return null;
+        }
+
+        const data = JSON.parse(body);
         if (Array.isArray(data)) return data;
         if (Array.isArray(data.players)) return data.players;
         logError(`Unexpected players.json structure from ${serverObj.url}`);
@@ -72,7 +109,7 @@ async function fetchPlayers(serverObj) {
         if (isUnreachableError(err)) {
             log(`Server ${serverObj.url} is offline or unreachable.`);
         } else {
-            log(`Error fetching ${serverObj.url}:`, err);
+            log(`Error fetching ${serverObj.url}:`, err.message || err);
         }
         return null;
     }
@@ -179,9 +216,13 @@ function autoDisableDetection() {
         if (hasActiveAlert(store.afkAlerts[discordUserId])) continue;
 
         const playerName = userCfg.player.name;
-        const anyOnline = servers().some(
-            server => userCfg.wasOnline && userCfg.wasOnline[`${playerName}|${server.name}`]
-        );
+        // Unobserved keys are `undefined`, which is correctly not "online" --
+        // but a user whose player has never been observed at all is skipped
+        // below so a restart cannot instantly disable their detection.
+        const keys = servers().map(server => `${playerName}|${server.name}`);
+        if (keys.every(key => !lastSeenOnline.has(key))) continue;
+
+        const anyOnline = keys.some(key => lastSeenOnline.get(key));
         if (!anyOnline) {
             userCfg.detection = false;
             saveUserConfigs();
@@ -232,14 +273,25 @@ async function checkPlayerStatus() {
                 const online = Boolean(player);
                 if (online) anyPlayerOnline = true;
 
+                // undefined means we have never seen this key before, which is
+                // neither a join nor a disconnect -- only a starting point.
+                const previouslyOnline = lastSeenOnline.get(key);
+                const firstObservation = previouslyOnline === undefined;
+                lastSeenOnline.set(key, online);
+
                 if (userCfg.afkDetection && online) {
                     await updateAfkTracking(discordUserId, userCfg, playerName, serverName, player);
                 } else if (!online) {
                     dropAfkTracking(discordUserId, playerName, serverName);
                 }
 
+                if (firstObservation) {
+                    // Seeded above; alerting starts from the next poll.
+                    continue;
+                }
+
                 // --- Player join alert logic ---
-                if (userCfg.joinNotify && userCfg.wasOnline && !userCfg.wasOnline[key] && online) {
+                if (userCfg.joinNotify && !previouslyOnline && online) {
                     log(
                         `Join alert: Player "${playerName}" joined server "${serverName}" (user ${discordUserId}). Sending DM.`
                     );
@@ -255,8 +307,7 @@ async function checkPlayerStatus() {
                 // ever got a DM because the generic branch has a strictly weaker
                 // condition and fired in the same iteration. These are now
                 // mutually exclusive, and the AFK branch sends its own message.
-                const disconnected =
-                    userCfg.detection && userCfg.wasOnline && userCfg.wasOnline[key] && !online;
+                const disconnected = userCfg.detection && previouslyOnline && !online;
                 const userAlerts = store.afkAlerts[discordUserId];
                 const afkAlertActive =
                     userAlerts && userAlerts[key] && userAlerts[key].expiresAt > Date.now();
@@ -283,12 +334,6 @@ async function checkPlayerStatus() {
                         `Player **${playerName}** has disconnected from the server (${serverName}).`
                     );
                 }
-
-                if (!userCfg.lastState) userCfg.lastState = {};
-                userCfg.lastState[key] = { online, dead: false };
-
-                if (!userCfg.wasOnline) userCfg.wasOnline = {};
-                userCfg.wasOnline[key] = online;
             }
         }
 
@@ -319,4 +364,13 @@ function startPolling(intervalMs) {
     }, intervalMs);
 }
 
-module.exports = { checkPlayerStatus, startPolling, cleanupAfkAlerts };
+module.exports = {
+    checkPlayerStatus,
+    startPolling,
+    cleanupAfkAlerts,
+    lastSeenOnline,
+    // Exported for tests: the undici error shapes are the risky part of having
+    // dropped node-fetch.
+    fetchPlayers,
+    isUnreachableError
+};

@@ -4,10 +4,11 @@ const { Client, GatewayIntentBits } = require('discord.js');
 
 const { log } = require('../config');
 
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages],
-    partials: ['CHANNEL']
-});
+// Sending a DM needs neither the DirectMessages intent nor a Channel partial --
+// those are for *receiving* them, which this bot never does. The old config
+// also used `partials: ['CHANNEL']`, which is v13 string syntax that silently
+// matched nothing on v14 anyway.
+const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 /**
  * Every DM goes through here.

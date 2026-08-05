@@ -35,6 +35,9 @@ const HELP_FIELDS = [
 module.exports = [
     {
         data: new SlashCommandBuilder().setName('help').setDescription('Show help for SpoonAlert bot'),
+        // Reads nothing and changes nothing, so it must not mint a stored
+        // record (and a full-file write) for a passer-by.
+        readOnly: true,
         async execute(interaction) {
             await ephemeralReply(interaction, {
                 embeds: [

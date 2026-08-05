@@ -22,7 +22,11 @@ module.exports = [
                 setInterval: 'readonly',
                 clearInterval: 'readonly',
                 setTimeout: 'readonly',
-                URL: 'readonly'
+                URL: 'readonly',
+                // Web globals built into Node 18+, used since node-fetch was dropped.
+                fetch: 'readonly',
+                AbortSignal: 'readonly',
+                AbortController: 'readonly'
             }
         },
         rules: {

@@ -99,10 +99,34 @@ Create a `.env` file in the root directory:
 ```
 DISCORD_TOKEN=your_discord_bot_token
 ADMIN_USER_ID=your_discord_user_id
+
+# Optional
+ADMIN_GUILD_ID=
+ALLOWED_SERVER_HOSTS=
 ```
 
-- `DISCORD_TOKEN`: Your Discord bot token (get from [Discord Developer Portal](https://discord.com/developers/applications)).
-- `ADMIN_USER_ID`: Your Discord user ID (for super admin access).
+| Variable | Required | Purpose |
+|---|---|---|
+| `DISCORD_TOKEN` | yes | Bot token from the [Discord Developer Portal](https://discord.com/developers/applications). |
+| `ADMIN_USER_ID` | yes | Your Discord user ID. This account is always an admin. Must be a 17–20 digit ID; the bot refuses to start otherwise. |
+| `ADMIN_GUILD_ID` | no | Pin admin commands to one server. When set, they are registered *only* there and the admin check refuses everywhere else. |
+| `ALLOWED_SERVER_HOSTS` | no | Comma-separated hostnames `/admin-server-add` is allowed to accept, e.g. `map.example.com,192.168.1.50`. Left unset, any `http(s)` URL is accepted. |
+
+> **Why `ALLOWED_SERVER_HOSTS` matters:** whatever URL an admin adds gets fetched from
+> the machine running the bot every 30 seconds, forever. If you share admin access with
+> anyone you don't fully trust, set this. It's opt-in because a blanket private-IP block
+> would reject the LAN address most self-hosted Squaremap installs actually use.
+
+### Granting admin access to others
+
+Use `/admin-role-add` and pick the role. Access is stored by **role ID** in `config.json`,
+so it survives restarts and cannot be gained by creating a role with a particular name.
+
+> **Upgrading:** older versions granted admin to anyone holding a role *named* `Admin`,
+> `Administrator`, or `SpoonAdmin`, in any server the bot had joined — and the list was
+> only held in memory, so revoking a role undid itself on the next restart. Those names
+> no longer grant anything. After updating, run `/admin-role-add` once per role you
+> actually want to have access. Your `ADMIN_USER_ID` account is unaffected.
 
 ### 4. Configure Bot Settings
 
@@ -142,7 +166,19 @@ Then edit `config.json` to set your Minecraft servers and polling intervals:
 ### 5. Run the Bot
 
 ```sh
-node index.js
+npm start
+```
+
+Requires **Node.js 18 or newer** (it uses the built-in `fetch`).
+
+---
+
+## Development
+
+```sh
+npm test          # unit tests (node:test, no network or Discord needed)
+npm run lint      # eslint
+npm run format    # prettier
 ```
 
 ---
@@ -150,6 +186,35 @@ node index.js
 ## Hosting
 
 You can host SpoonAlert on any Node.js-compatible platform, including Pterodactyl, Heroku, or your own server.
+
+**Run it under a supervisor that restarts on exit.** The bot exits deliberately on
+unrecoverable startup problems (missing config, bad token, corrupt `userConfigs.json`), and
+nothing should be relied on to run forever unattended.
+
+With [pm2](https://pm2.keymetrics.io/):
+
+```sh
+npm install -g pm2
+pm2 start index.js --name spoonalert
+pm2 save && pm2 startup
+```
+
+Or as a systemd unit (`/etc/systemd/system/spoonalert.service`):
+
+```ini
+[Unit]
+Description=SpoonAlert Discord bot
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/spoonalert
+ExecStart=/usr/bin/node index.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
 
 ---
 

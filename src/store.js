@@ -4,6 +4,7 @@ const path = require('path');
 
 const {
     config,
+    servers,
     log,
     logError,
     CONFIG_PATH,
@@ -12,7 +13,11 @@ const {
     AFK_TRACKING_PATH
 } = require('./config');
 const { loadJson, writeJsonAtomic, quarantineCorrupt } = require('./lib/jsonStore');
-const { normalizeUserConfig, serializeUserConfig } = require('./lib/userConfig');
+const {
+    normalizeUserConfig,
+    serializeUserConfig,
+    DEFAULT_AFK_THRESHOLD_MINUTES
+} = require('./lib/userConfig');
 
 /**
  * All mutable persisted state lives on this one object rather than in
@@ -110,30 +115,73 @@ function saveConfig() {
     }
 }
 
-/** Fetch a user's config, creating it with defaults on first use. */
-function getUserConfig(userId) {
+function defaultUserConfig() {
+    return {
+        player: null,
+        detection: true,
+        joinNotify: false,
+        afkDetection: false,
+        afkThresholdMinutes: DEFAULT_AFK_THRESHOLD_MINUTES,
+        persistentDetection: false
+    };
+}
+
+/**
+ * Fetch a user's config, creating it on first use.
+ *
+ * `persist: false` hands back defaults without minting a permanent record, so
+ * read-only interactions do not create an entry (and a full-file write) for
+ * everyone who ever pressed a button.
+ */
+function getUserConfig(userId, { persist = true } = {}) {
     if (!store.userConfigs[userId]) {
-        store.userConfigs[userId] = {
-            player: null,
-            deathNotify: true,
-            detection: true,
-            joinNotify: false,
-            afkDetection: false,
-            afkThresholdMinutes: 10,
-            persistentDetection: false,
-            wasOnline: {},
-            lastState: {}
-        };
+        if (!persist) return defaultUserConfig();
+        store.userConfigs[userId] = defaultUserConfig();
         log(`Created config for new user ${userId}.`);
         saveUserConfigs();
     }
     return store.userConfigs[userId];
 }
 
+/**
+ * Drop state keyed to servers that no longer exist or to players nobody is
+ * watching any more. Without this, removing a server left keys that no poll
+ * could ever match, to be re-parsed on every startup forever.
+ */
+function pruneOrphanedState() {
+    const serverNames = new Set(servers().map(s => s.name));
+    let removed = 0;
+
+    for (const collection of [store.afkAlerts, store.afkTracking]) {
+        for (const [uid, entries] of Object.entries(collection)) {
+            const userCfg = store.userConfigs[uid];
+            const currentPlayer = userCfg && userCfg.player ? userCfg.player.name : null;
+
+            for (const key of Object.keys(entries)) {
+                const [playerName, serverName] = key.split('|');
+                if (!serverNames.has(serverName) || playerName !== currentPlayer) {
+                    delete entries[key];
+                    removed++;
+                }
+            }
+            if (Object.keys(entries).length === 0) delete collection[uid];
+        }
+    }
+
+    if (removed > 0) {
+        log(`Pruned ${removed} orphaned state entr${removed === 1 ? 'y' : 'ies'}.`);
+        saveAfkAlerts();
+        saveAfkTracking();
+    }
+    return removed;
+}
+
 module.exports = {
     store,
     loadAll,
     getUserConfig,
+    defaultUserConfig,
+    pruneOrphanedState,
     saveUserConfigs,
     saveAfkAlerts,
     saveAfkTracking,
