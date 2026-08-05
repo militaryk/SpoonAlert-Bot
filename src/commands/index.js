@@ -1,8 +1,6 @@
 'use strict';
 
-const alerts = require('./alerts');
-const player = require('./player');
-const afk = require('./afk');
+const spoon = require('./spoon');
 const admin = require('./admin');
 const help = require('./help');
 
@@ -13,10 +11,14 @@ const help = require('./help');
  * shape hid a dead `/listplayers` branch that was never registered, had no
  * terminal `else` so unknown commands were silently never answered, and got
  * two of its branches physically merged onto one line during editing.
+ *
+ * The twelve toggle and status commands that used to live here are now buttons
+ * on the /spoon panel. rest.put replaces the whole command set, so they
+ * disappear from autocomplete on the next start with no manual deregistration.
  */
 const registry = new Map();
 
-for (const command of [...alerts, ...player, ...afk, ...admin, ...help]) {
+for (const command of [...spoon, ...admin, ...help]) {
     if (registry.has(command.data.name)) {
         throw new Error(`Duplicate command definition: ${command.data.name}`);
     }

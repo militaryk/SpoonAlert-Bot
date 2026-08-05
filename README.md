@@ -40,6 +40,7 @@ This will trigger a disconnect alert from the bot, even if the player is still o
 
 ## Features
 
+- **One dashboard:** `/spoon` opens a private panel with buttons for everything. No commands to memorise.
 - **Player Disconnect Alerts:** Get notified when your tracked player leaves the server.
 - **Player Join Alerts:** Get notified when your tracked player joins the server.
 - **AFK Detection:** Get notified when your player hasn't moved for a specified time period.
@@ -47,6 +48,32 @@ This will trigger a disconnect alert from the bot, even if the player is still o
 - **Easy Setup:** Configure via environment variables and `config.json`.
 - **Multi-server Support:** Monitor players across multiple Minecraft servers.
 - **Admin Commands:** Add/remove servers and admin roles via Discord.
+
+---
+
+## The Dashboard
+
+Run `/spoon`. The panel is private — only you can see it or click its buttons — and it always
+reflects your current settings.
+
+```
++------------------------------------------------+
+|  SpoonAlert                                    |
+|  Monitored player   **Steve** on `SurvivalSMP` |
+|  Disconnect  On     Join  Off                  |
+|  AFK detection  On (10 min)   Persistent  Off  |
+|  AFK alert  3h 20m left (1 server)             |
++------------------------------------------------+
+[Disconnect: On][Join: Off][AFK detect: On][Persistent: Off]
+[Change player][Stop monitoring][AFK timer][AFK threshold]
+[Refresh][Servers][Admin*]
+```
+
+Toggle buttons are green when on and grey when off, so the panel reads at a glance.
+`*` The Admin button only appears if you have admin access.
+
+The panel keeps working after the bot restarts — button routing is stateless, so an old panel
+is never left dead. If you leave one open for a long time, hit **Refresh** to re-sync it.
 
 ---
 
@@ -128,27 +155,35 @@ You can host SpoonAlert on any Node.js-compatible platform, including Pterodacty
 
 ## Commands Reference
 
-All commands are available as Discord slash commands:
+There are only seven commands — everything a normal user needs lives on the `/spoon` panel.
 
 | Command                | Description                                      |
 |------------------------|--------------------------------------------------|
-| `/player-add <name>`   | Set the Minecraft player you want to monitor.    |
-| `/player-remove`       | Stop monitoring your current player.             |
-| `/alert-enable`        | Enable disconnect notifications.                 |
-| `/alert-disable`       | Disable disconnect notifications.                |
-| `/alert-status`        | Show your current notification and AFK alert status. |
-| `/alert-persistent`    | Toggle persistent detection (auto-enable detection even when offline). |
-| `/afk-alert <hours>`   | Enable AFK disconnect alert for your player for a set number of hours. |
-| `/afk-enable <minutes>`| Enable AFK detection (1-60 minutes of inactivity). |
-| `/afk-disable`         | Disable AFK detection.                          |
-| `/join-enable`         | Enable player join notifications.                |
-| `/join-disable`        | Disable player join notifications.               |
-| `/server-list`         | List all configured Minecraft servers.           |
-| `/help`                | Show help and command documentation.             |
+| `/spoon`               | Open your dashboard. Set your player and toggle every alert from here. |
+| `/help`                | Show help.                                       |
 | `/admin-server-add`    | Add a new Minecraft server (admin only). **The URL must be the full URL to your `/tiles/players.json` file.** |
 | `/admin-server-remove` | Remove a Minecraft server (admin only).          |
 | `/admin-role-add`      | Add a role to the admin list (super admin only). |
 | `/admin-role-remove`   | Remove a role from the admin list (super admin only). |
+| `/bot-status`          | Show version, uptime and usage stats (admin only). |
+
+### Panel controls
+
+| Control            | What it does                                              |
+|--------------------|-----------------------------------------------------------|
+| **Disconnect**     | DM you when your player leaves the server.                |
+| **Join**           | DM you when your player comes online.                     |
+| **AFK detect**     | DM you when your player stops moving.                     |
+| **Persistent**     | Keep disconnect alerts on even while your player is offline. |
+| **Change player**  | Set which Minecraft username to watch.                    |
+| **Stop monitoring**| Clear your player and all its alert state.                |
+| **AFK timer**      | Watch for a disconnect for a set number of hours (up to a week). |
+| **AFK threshold**  | How long standing still counts as AFK (1–60 minutes).     |
+
+> **Upgrading from an older version?** The twelve commands these buttons replace
+> (`/alert-*`, `/player-*`, `/join-*`, `/afk-*`, `/server-list`) are gone. Command registration
+> replaces the whole set, so they disappear from autocomplete the first time the bot starts.
+> Your existing settings are untouched.
 
 ---
 

@@ -13,23 +13,15 @@ process.env.ADMIN_USER_ID = '123456789012345678';
 const commands = require('../src/commands');
 
 /**
- * The exact command surface as it existed before the module split, captured so
- * the refactor is provably a no-op. Option types are the Discord API numbers:
+ * The exact command surface. Option types are the Discord API numbers:
  * 3 = STRING, 4 = INTEGER.
+ *
+ * Twelve commands were deliberately retired into the /spoon panel; RETIRED
+ * below asserts they are really gone, so a stray re-registration is caught.
  */
 const EXPECTED = {
-    'alert-enable': [],
-    'alert-disable': [],
-    'alert-persistent': [],
-    'alert-status': [],
-    'join-enable': [],
-    'join-disable': [],
-    'player-add': [{ name: 'player', type: 3, required: true }],
-    'player-remove': [],
-    'server-list': [],
-    'afk-enable': [{ name: 'minutes', type: 4, required: true }],
-    'afk-disable': [],
-    'afk-alert': [{ name: 'hours', type: 4, required: true }],
+    spoon: [],
+    help: [],
     'admin-server-add': [
         { name: 'name', type: 3, required: true },
         { name: 'url', type: 3, required: true }
@@ -37,9 +29,23 @@ const EXPECTED = {
     'admin-server-remove': [{ name: 'name', type: 3, required: true }],
     'admin-role-add': [{ name: 'rolename', type: 3, required: true }],
     'admin-role-remove': [{ name: 'rolename', type: 3, required: true }],
-    'bot-status': [],
-    help: []
+    'bot-status': []
 };
+
+const RETIRED = [
+    'alert-enable',
+    'alert-disable',
+    'alert-persistent',
+    'alert-status',
+    'join-enable',
+    'join-disable',
+    'player-add',
+    'player-remove',
+    'server-list',
+    'afk-enable',
+    'afk-disable',
+    'afk-alert'
+];
 
 test('registers exactly the expected command set', () => {
     const actual = [...commands.registry.keys()].sort();
@@ -90,4 +96,15 @@ test('get() returns undefined for an unknown command', () => {
     // The old chain had no terminal else, so this case went unanswered.
     assert.equal(commands.get('listplayers'), undefined);
     assert.equal(commands.get('nope'), undefined);
+});
+
+test('the twelve panel-replaced commands are no longer registered', () => {
+    for (const name of RETIRED) {
+        assert.equal(commands.get(name), undefined, `/${name} should now be a button`);
+    }
+});
+
+test('the command list is small enough to be worth having', () => {
+    // Went from 18 commands to 7 -- the whole point of the panel.
+    assert.equal(commands.registry.size, 7);
 });

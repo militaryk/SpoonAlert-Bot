@@ -1,6 +1,6 @@
 'use strict';
 
-const { REST, Routes, InteractionType } = require('discord.js');
+const { REST, Routes } = require('discord.js');
 
 const { discordToken, log, logError, POLL_ONLINE_MS } = require('./src/config');
 const { loadAll, getUserConfig } = require('./src/store');
@@ -10,6 +10,7 @@ const { checkPlayerStatus, startPolling } = require('./src/poller');
 const commands = require('./src/commands');
 const { recordUsage } = require('./src/stats');
 const { ephemeralReply } = require('./src/ui/reply');
+const { handleComponent, handleModal } = require('./src/ui/router');
 
 // Backstop for anything that still escapes a handler. console.error directly,
 // not log(), so it is never hidden by loggingEnabled being false.
@@ -61,9 +62,7 @@ async function replyWithError(interaction) {
     }
 }
 
-client.on('interactionCreate', async interaction => {
-    if (interaction.type !== InteractionType.ApplicationCommand) return;
-
+async function handleSlashCommand(interaction) {
     const command = commands.get(interaction.commandName);
     if (!command) {
         // The old chain had no terminal else, so an unregistered command was
@@ -81,10 +80,23 @@ client.on('interactionCreate', async interaction => {
         recordUsage();
     }
 
+    await command.execute(interaction, { userCfg, userId });
+}
+
+client.on('interactionCreate', async interaction => {
     try {
-        await command.execute(interaction, { userCfg, userId });
+        if (interaction.isChatInputCommand()) {
+            await handleSlashCommand(interaction);
+        } else if (interaction.isButton() || interaction.isStringSelectMenu()) {
+            // Panel clicks. Each one is a fresh interaction with its own token,
+            // so a panel stays usable indefinitely -- including across a
+            // restart, since routing is stateless and keyed only on customId.
+            await handleComponent(interaction);
+        } else if (interaction.isModalSubmit()) {
+            await handleModal(interaction);
+        }
     } catch (err) {
-        logError(`Error handling /${interaction.commandName}:`, err);
+        logError(`Error handling interaction (${interaction.customId || interaction.commandName}):`, err);
         await replyWithError(interaction);
     }
 });

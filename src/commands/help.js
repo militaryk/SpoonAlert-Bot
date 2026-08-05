@@ -8,26 +8,28 @@ const { ephemeralReply } = require('../ui/reply');
 // advertised here for a year without ever existing -- `dead` is hardcoded
 // false in the poller and nothing ever reads it.
 const BOT_DESCRIPTION = `SpoonAlert watches Minecraft players on your server and sends you a DM when they join, disconnect, or go AFK.
-Add or remove players to your watchlist, toggle notifications, and get status updates with slash commands.
+Everything lives in one dashboard: run \`/spoon\` and use the buttons.
 Perfect for AFK warriors and forgetful adventurers!`;
 
 const HELP_FIELDS = [
-    { name: '/alert-enable', value: 'Enable disconnect notifications.' },
-    { name: '/alert-disable', value: 'Disable disconnect notifications.' },
-    { name: '/alert-status', value: 'Show your current notification and AFK alert status.' },
     {
-        name: '/alert-persistent',
-        value: 'Toggle persistent detection (auto-enable detection even when offline).'
+        name: '/spoon',
+        value:
+            'Your dashboard. Set the player you want to watch, then toggle alerts from the buttons:\n' +
+            '• **Disconnect** — DM when your player leaves\n' +
+            '• **Join** — DM when they come online\n' +
+            '• **AFK detect** — DM when they stop moving\n' +
+            '• **Persistent** — keep disconnect alerts on even while your player is offline\n' +
+            '• **AFK timer** — watch for a disconnect for a set number of hours\n' +
+            '• **AFK threshold** — how long standing still counts as AFK'
     },
-    { name: '/player-add <name>', value: 'Monitor a Minecraft player.' },
-    { name: '/player-remove', value: 'Stop monitoring your player.' },
-    { name: '/server-list', value: 'List all configured Minecraft servers.' },
-    { name: '/afk-alert <hours>', value: 'Enable AFK disconnect alert for your player.' },
-    { name: '/afk-enable <minutes>', value: 'Enable AFK detection (1-60 minutes of inactivity).' },
-    { name: '/afk-disable', value: 'Disable AFK detection.' },
-    { name: '/join-enable', value: 'Enable player join notifications.' },
-    { name: '/join-disable', value: 'Disable player join notifications.' },
-    { name: '/help', value: 'Show this help message.' }
+    { name: '/help', value: 'Show this message.' },
+    {
+        name: 'Admin',
+        value:
+            '`/admin-server-add`, `/admin-server-remove`, `/admin-role-add`, ' +
+            '`/admin-role-remove`, `/bot-status`'
+    }
 ];
 
 module.exports = [

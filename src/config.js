@@ -10,10 +10,13 @@ const ROOT = path.join(__dirname, '..');
 
 // SPOONALERT_CONFIG lets the tests point at a fixture instead of the real
 // config.json, which is gitignored and so absent on a fresh clone.
+// SPOONALERT_STATE_DIR redirects the three state files into a temp directory
+// so tests can exercise code that saves without touching real user data.
 const CONFIG_PATH = process.env.SPOONALERT_CONFIG || path.join(ROOT, 'config.json');
-const USER_CONFIGS_PATH = path.join(ROOT, 'userConfigs.json');
-const AFK_ALERTS_PATH = path.join(ROOT, 'afkAlerts.json');
-const AFK_TRACKING_PATH = path.join(ROOT, 'afkTracking.json');
+const STATE_DIR = process.env.SPOONALERT_STATE_DIR || ROOT;
+const USER_CONFIGS_PATH = path.join(STATE_DIR, 'userConfigs.json');
+const AFK_ALERTS_PATH = path.join(STATE_DIR, 'afkAlerts.json');
+const AFK_TRACKING_PATH = path.join(STATE_DIR, 'afkTracking.json');
 
 // config.json used to be a bare `require`, which throws SyntaxError (empty or
 // truncated file) or MODULE_NOT_FOUND (fresh clone) before anything can

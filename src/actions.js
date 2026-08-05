@@ -14,6 +14,15 @@ const MAX_AFK_THRESHOLD_MINUTES = 60;
  * store.save*(), which keeps these trivially testable.
  */
 
+// Minecraft usernames are 3-16 of [A-Za-z0-9_]. Worth enforcing because the
+// name becomes half of every composite state key ("Steve|SurvivalSMP"), so a
+// pipe in it silently corrupts the split back out.
+const PLAYER_NAME_PATTERN = /^[A-Za-z0-9_]{3,16}$/;
+
+function isValidPlayerName(name) {
+    return typeof name === 'string' && PLAYER_NAME_PATTERN.test(name);
+}
+
 function setPlayer(userCfg, name) {
     userCfg.player = { name };
 }
@@ -94,6 +103,8 @@ module.exports = {
     MAX_AFK_ALERT_HOURS,
     MIN_AFK_THRESHOLD_MINUTES,
     MAX_AFK_THRESHOLD_MINUTES,
+    PLAYER_NAME_PATTERN,
+    isValidPlayerName,
     setPlayer,
     clearPlayer,
     setDetection,
