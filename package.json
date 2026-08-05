@@ -1,11 +1,30 @@
 {
   "name": "spoonalert",
   "version": "1.2.0",
+  "description": "Discord bot that DMs you when a Minecraft player joins, disconnects, or goes AFK.",
   "main": "index.js",
   "type": "commonjs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "test": "node --test",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"**/*.js\"",
+    "format:check": "prettier --check \"**/*.js\""
+  },
   "dependencies": {
     "discord.js": "^14.0.0",
     "dotenv": "^16.5.0",
     "node-fetch": "^2.6.7"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.8.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6"
   }
 }

@@ -5,4 +5,9 @@ config.json
 userConfigs.json
 afkAlerts.json
 afkTracking.json
+
+# Quarantined state files and in-flight atomic writes
+*.corrupt-*
+*.json.tmp
+
 !package.json
