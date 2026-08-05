@@ -1,9 +1,22 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits, REST, Routes, SlashCommandBuilder, InteractionType } = require('discord.js');
 const fetch = require('node-fetch');
-const config = require('./config.json');
 const fs = require('fs');
 const path = require('path');
+
+// config.json used to be a bare `require`, which throws SyntaxError (empty/truncated
+// file) or MODULE_NOT_FOUND (fresh clone) before anything can explain why.
+const CONFIG_PATH = path.join(__dirname, 'config.json');
+let config;
+try {
+    config = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+} catch (e) {
+    console.error(
+        `[SpoonAlert] Could not read config.json: ${e.code === 'ENOENT' ? 'file not found' : e.message}\n` +
+        '            Copy config.json.template to config.json and fill in your servers.'
+    );
+    process.exit(1);
+}
 
 // Add this to load the version from package.json
 const BOT_VERSION = require('./package.json').version;
@@ -157,9 +170,31 @@ loadAfkTracking();
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.DirectMessages], partials: ['CHANNEL'] });
 
+// Every DM goes through here. Previously each site did a bare, unawaited
+// `user.send()`; that promise rejects with 50007 whenever the recipient has DMs
+// off or has blocked the bot, and an unhandled rejection terminates Node 15+ --
+// taking down alerts for every other user. Never throws, so callers in the poll
+// loop can't be unwound by one undeliverable message.
+async function sendDm(userId, content) {
+    try {
+        const user = await client.users.fetch(userId);
+        await user.send(content);
+        return true;
+    } catch (err) {
+        log(`Could not DM ${userId}:`, err.code || err.message || err);
+        return false;
+    }
+}
+
+// Backstop: console.error directly, not log(), so this is never hidden by
+// loggingEnabled being false.
+process.on('unhandledRejection', err => {
+    console.error('[SpoonAlert] Unhandled promise rejection:', err);
+});
+
 // Bot description (for Discord application page)
-const BOT_DESCRIPTION = `SpoonAlert watches Minecraft players on your server and sends you a DM when they disconnect or die. 
-Add or remove players to your watchlist, toggle notifications, and get status updates with slash commands. 
+const BOT_DESCRIPTION = `SpoonAlert watches Minecraft players on your server and sends you a DM when they join, disconnect, or go AFK.
+Add or remove players to your watchlist, toggle notifications, and get status updates with slash commands.
 Perfect for AFK warriors and forgetful adventurers!`;
 
 // Funny activities for rich presence
@@ -175,6 +210,21 @@ const funnyActivities = [
 
 const ADMIN_ROLE_NAMES = ['Admin', 'Administrator', 'SpoonAdmin']; // Add your admin role names here
 const ENV_ADMIN_USER_ID = process.env.ADMIN_USER_ID; // Discord user ID of the super admin
+
+// Fail fast on missing credentials. An unset ADMIN_USER_ID is especially nasty:
+// `interaction.user.id !== undefined` is always true, so the role commands
+// silently reject everyone, including the owner, with no hint of the cause.
+if (!discordToken) {
+    console.error('[SpoonAlert] DISCORD_TOKEN is not set. Add it to your .env file.');
+    process.exit(1);
+}
+if (!/^\d{17,20}$/.test(ENV_ADMIN_USER_ID || '')) {
+    console.error(
+        '[SpoonAlert] ADMIN_USER_ID is missing or malformed (expected a Discord user ID, 17-20 digits).\n' +
+        '            Without it, nobody can use /admin-role-add or /admin-role-remove.'
+    );
+    process.exit(1);
+}
 
 // Register slash commands
 const commands = [
@@ -283,17 +333,25 @@ client.once('ready', async () => {
     setRandomActivity();
     setInterval(setRandomActivity, 5 * 60 * 1000);
 
+    // Start polling first. Command registration below can fail (a guild joined
+    // without the applications.commands scope returns 403), and it used to throw
+    // out of this listener before polling was ever started -- stale commands are
+    // survivable, no monitoring at all is not.
+    startPolling(POLL_ONLINE_MS);
+
     // Register commands for the guilds the bot is in
     const rest = new REST({ version: '10' }).setToken(discordToken);
     const guilds = client.guilds.cache.map(guild => guild.id);
     for (const guildId of guilds) {
-        await rest.put(
-            Routes.applicationGuildCommands(client.user.id, guildId),
-            { body: commands }
-        );
+        try {
+            await rest.put(
+                Routes.applicationGuildCommands(client.user.id, guildId),
+                { body: commands }
+            );
+        } catch (err) {
+            log(`Failed to register commands for guild ${guildId}:`, err.message || err);
+        }
     }
-    // Start polling (initially online rate)
-    startPolling(POLL_ONLINE_MS);
 
     // Initial call, also wrapped
     try {
@@ -611,7 +669,7 @@ client.on('interactionCreate', async interaction => {
             return;
         }
         if (!userCfg.player) {
-            await interaction.reply({ content: 'You are not monitoring any player. Use /addplayer first.', ephemeral: true });
+            await interaction.reply({ content: 'You are not monitoring any player. Use `/player-add` first.', ephemeral: true });
             return;
         }
         const player = userCfg.player.name;
@@ -747,11 +805,10 @@ function cleanupAfkAlerts() {
                 userConfigs[uid].detection = false;
                 saveUserConfigs();
                 // Notify user that AFK alert expired and detection is now disabled
-                client.users.fetch(uid).then(user => {
-                    user.send(
-                        "Your AFK alert period has expired. Player disconnect detection is now disabled. Use `/afk-alert` or `/alert-enable` to re-enable."
-                    ).catch(() => {});
-                }).catch(() => {});
+                sendDm(
+                    uid,
+                    "Your AFK alert period has expired. Player disconnect detection is now disabled. Use `/afk-alert` or `/alert-enable` to re-enable."
+                );
             }
         }
     }
@@ -767,21 +824,39 @@ let pollIntervalHandle = null;
 let lastAnyPlayerOnline = null;
 let currentPollIntervalMs = null;
 
+// Guards against overlapping ticks. A server that accepts the connection and
+// then stalls used to park an await forever while the interval kept starting
+// fresh runs on top of it; when the host recovered they all completed at once,
+// each reading the same pre-update wasOnline and each firing a duplicate DM.
+let pollInProgress = false;
+
 // Helper to start or restart polling with a new interval
 function startPolling(intervalMs) {
     if (pollIntervalHandle) clearInterval(pollIntervalHandle);
     currentPollIntervalMs = intervalMs;
     pollIntervalHandle = setInterval(async () => {
+        if (pollInProgress) {
+            log('Previous poll still running, skipping this tick.');
+            return;
+        }
+        pollInProgress = true;
         try {
             await checkPlayerStatus();
         } catch (err) {
             log('Error in checkPlayerStatus interval:', err);
+        } finally {
+            pollInProgress = false;
         }
     }, intervalMs);
 }
 
 async function checkPlayerStatus() {
     try {
+        // Expire timed AFK alerts. This was a complete function with zero call
+        // sites, so alerts never expired, the "your AFK alert expired" DM never
+        // fired, and one stale entry pinned a user's detection on forever.
+        cleanupAfkAlerts();
+
         let anyPlayerOnline = false;        // Build a map of { serverName: [{discordUserId, playerName}] }
         const serverMap = {};
         for (const [discordUserId, userCfg] of Object.entries(userConfigs)) {
@@ -800,7 +875,9 @@ async function checkPlayerStatus() {
             if (!serverObj) continue;
             let playersArr = [];
             try {
-                const res = await fetch(serverObj.url);
+                // node-fetch defaults are timeout: 0 (wait forever) and size: 0
+                // (unbounded body) -- both are wrong for an unattended poller.
+                const res = await fetch(serverObj.url, { timeout: 10000, size: 512 * 1024 });
                 if (!res.ok) {
                     log(`Server ${serverObj.url} is offline or unreachable (HTTP ${res.status}).`);
                     continue;
@@ -820,6 +897,8 @@ async function checkPlayerStatus() {
                     err.code === 'ETIMEDOUT' ||
                     err.code === 'ENOTFOUND' ||
                     err.type === 'system' ||
+                    err.type === 'request-timeout' ||
+                    err.type === 'max-size' ||
                     (err.message && err.message.includes('Failed to fetch'))
                 ) {
                     log(`Server ${serverObj.url} is offline or unreachable.`);
@@ -853,8 +932,7 @@ async function checkPlayerStatus() {
                             y: currentPos.y,
                             z: currentPos.z,
                             lastMoved: now,
-                            afkDetectionEnabled: true,
-                            afkThresholdMinutes: userCfg.afkThresholdMinutes
+                            alerted: false
                         };
                         saveAfkTracking();
                     } else {
@@ -868,34 +946,35 @@ async function checkPlayerStatus() {
                             Math.abs(tracked.z - currentPos.z) > tolerance;
                         
                         if (moved) {
-                            // Player moved - update position and reset timer
+                            // Player moved - update position, reset timer, and re-arm
+                            // the alert so the next idle streak notifies again.
                             tracked.x = currentPos.x;
                             tracked.y = currentPos.y;
                             tracked.z = currentPos.z;
                             tracked.lastMoved = now;
-                            tracked.afkThresholdMinutes = userCfg.afkThresholdMinutes; // Update threshold in case user changed it
+                            tracked.alerted = false;
                             saveAfkTracking();
                         } else {
-                            // Player hasn't moved - check if they've been AFK too long
+                            // Player hasn't moved - check if they've been AFK too long.
+                            // Threshold is read live so /afk-enable takes effect on a
+                            // player who is already standing still.
                             const timeSinceLastMove = now - tracked.lastMoved;
-                            const afkThresholdMs = tracked.afkThresholdMinutes * 60 * 1000;
-                            
-                            if (timeSinceLastMove >= afkThresholdMs) {
-                                // Player is AFK - send notification
-                                try {
-                                    const user = await client.users.fetch(discordUserId);
-                                    const afkMinutes = Math.floor(timeSinceLastMove / 60000);
-                                    log(`AFK detection: Player "${playerName}" has been AFK for ${afkMinutes} minutes on server "${serverName}" (user ${discordUserId}). Sending DM.`);
-                                    if (user) {
-                                        user.send(`🚨 **AFK Alert**: Player **${playerName}** has been inactive for ${afkMinutes} minutes on ${serverName}.\nLast position: X:${Math.round(tracked.x)}, Y:${Math.round(tracked.y)}, Z:${Math.round(tracked.z)}`);
-                                    }
-                                    
-                                    // Reset the timer to avoid spam notifications
-                                    tracked.lastMoved = now;
-                                    saveAfkTracking();
-                                } catch (error) {
-                                    log('Error sending AFK notification:', error);
-                                }
+                            const afkThresholdMs = userCfg.afkThresholdMinutes * 60 * 1000;
+
+                            // `alerted` latches until the player actually moves. This
+                            // used to reset lastMoved instead, which left the position
+                            // unchanged -- so it re-fired every threshold forever (~96
+                            // DMs overnight at 5 minutes) and every message after the
+                            // first misreported the idle time as one threshold.
+                            if (timeSinceLastMove >= afkThresholdMs && !tracked.alerted) {
+                                const afkMinutes = Math.floor(timeSinceLastMove / 60000);
+                                log(`AFK detection: Player "${playerName}" has been AFK for ${afkMinutes} minutes on server "${serverName}" (user ${discordUserId}). Sending DM.`);
+                                await sendDm(
+                                    discordUserId,
+                                    `🚨 **AFK Alert**: Player **${playerName}** has been inactive for ${afkMinutes} minutes on ${serverName}.\nLast position: X:${Math.round(tracked.x)}, Y:${Math.round(tracked.y)}, Z:${Math.round(tracked.z)}`
+                                );
+                                tracked.alerted = true;
+                                saveAfkTracking();
                             }
                         }
                     }
@@ -913,36 +992,36 @@ async function checkPlayerStatus() {
 
                 // --- Player join alert logic ---
                 if (userCfg.joinNotify && userCfg.wasOnline && !userCfg.wasOnline[key] && online) {
-                    const user = await client.users.fetch(discordUserId);
                     log(`Join alert: Player "${playerName}" joined server "${serverName}" (user ${discordUserId}). Sending DM.`);
-                    if (user) {
-                        user.send(`Player **${playerName}** has joined the server (${serverName}).`);
-                    }
-                }// --- AFK Alert logic ---
-                if (
-                    userCfg.detection &&
+                    await sendDm(discordUserId, `Player **${playerName}** has joined the server (${serverName}).`);
+                }
+
+                // --- Disconnect alerts ---
+                // One message per disconnect. The AFK-alert branch used to fetch the
+                // user, log "Sending AFK DM" and then send nothing; users only ever
+                // got a DM because the generic branch below has a strictly weaker
+                // condition and fired in the same iteration. These are now mutually
+                // exclusive, and the AFK branch sends its own message.
+                const disconnected = userCfg.detection && userCfg.wasOnline && userCfg.wasOnline[key] && !online;
+                const afkAlertActive =
                     afkAlerts[discordUserId] &&
                     afkAlerts[discordUserId][key] &&
-                    userCfg.wasOnline &&
-                    userCfg.wasOnline[key] &&
-                    !online
-                ) {
-                    const user = await client.users.fetch(discordUserId);
+                    afkAlerts[discordUserId][key].expiresAt > Date.now();
+
+                if (disconnected && afkAlertActive) {
                     log(`AFK alert: Player "${playerName}" disconnected from server "${serverName}" (user ${discordUserId}). Sending AFK DM.`);
+                    await sendDm(
+                        discordUserId,
+                        `⏰ **AFK Alert**: Player **${playerName}** has disconnected from ${serverName} during your AFK alert window.`
+                    );
                     delete afkAlerts[discordUserId][key];
                     if (Object.keys(afkAlerts[discordUserId]).length === 0) {
                         delete afkAlerts[discordUserId];
                     }
                     saveAfkAlerts(); // Save after deleting AFK alert
-                }
-
-                // ...existing code for normal disconnect alert...
-                if (userCfg.detection && userCfg.wasOnline && userCfg.wasOnline[key] && !online) {
-                    const user = await client.users.fetch(discordUserId);
+                } else if (disconnected) {
                     log(`Disconnect alert: Player "${playerName}" disconnected from server "${serverName}" (user ${discordUserId}). Sending DM.`);
-                    if (user) {
-                        user.send(`Player **${playerName}** has disconnected from the server (${serverName}).`);
-                    }
+                    await sendDm(discordUserId, `Player **${playerName}** has disconnected from the server (${serverName}).`);
                 }
 
                 if (player) {
@@ -966,9 +1045,10 @@ async function checkPlayerStatus() {
                 userCfg.player
             ) {
                 // Only auto-disable if there are NO active AFK alerts for this user
-                const hasActiveAfk =
-                    afkAlerts[discordUserId] &&
-                    Object.keys(afkAlerts[discordUserId]).length > 0;
+                // Must check expiry, not just presence -- counting keys meant a
+                // single stale entry pinned this user's detection on forever.
+                const hasActiveAfk = Object.values(afkAlerts[discordUserId] || {})
+                    .some(alert => alert.expiresAt > Date.now());
                 if (hasActiveAfk) continue;
 
                 const playerName = userCfg.player.name;
@@ -1002,7 +1082,10 @@ async function checkPlayerStatus() {
     }
 }
 
-client.login(discordToken);
+client.login(discordToken).catch(err => {
+    console.error('[SpoonAlert] Failed to log in to Discord:', err.message || err);
+    process.exit(1);
+});
 
 // Add this helper function near the top, after config is loaded
 function log(...args) {

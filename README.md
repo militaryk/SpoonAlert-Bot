@@ -2,7 +2,7 @@
 
 **Current Version:** `1.2.0`
 
-SpoonAlert is a Discord bot that monitors Minecraft players on your server and sends you a DM when they disconnect, die, or join.  
+SpoonAlert is a Discord bot that monitors Minecraft players on your server and sends you a DM when they join, disconnect, or go AFK.  
 Easily manage your watchlist and notification preferences with slash commands.
 
 ---
@@ -90,8 +90,6 @@ Then edit `config.json` to set your Minecraft servers and polling intervals:
 
 ```json
 {
-  "discordToken": "@@DISCORD_TOKEN_ENV@@",
-  "channelId": "@@DISCORD_CHANNEL_ID_ENV@@",
   "servers": [
     {
       "name": "Your Server Name",
@@ -110,7 +108,7 @@ Then edit `config.json` to set your Minecraft servers and polling intervals:
 - `loggingEnabled`: Set to `true` to enable console logging for bot actions.
 
 **Note:**  
-- The `discordToken` and `channelId` fields are not used if you set the values via the `.env` file and Discord slash commands.
+- The Discord token and admin user ID come from `.env`, not `config.json`.
 - You can add multiple servers to the `servers` array for multi-server monitoring.
 - `userConfigs.json` will be automatically populated as users interact with the bot.
 
