@@ -86,25 +86,30 @@ jobs:
                     -d '{"signal":"restart"}'
                   echo "Restart requested."
 
-            - name: Confirm the bot came back up
+            - name: Confirm a FRESH process is running
               env:
                   PANEL: ${{ secrets.PTERO_PANEL_URL }}
                   SERVER: ${{ secrets.PTERO_SERVER_ID }}
                   KEY: ${{ secrets.PTERO_API_KEY }}
+                  MAX_FRESH_UPTIME_MS: '180000' # 3 minutes
               run: |
-                  # Without this a deploy that boots straight into a crash loop
-                  # still shows a green tick. Poll rather than sleeping a fixed
-                  # time, because `npm install` on boot is not instant.
+                  # Checking only for "running" is not enough: a restart takes a
+                  # few seconds to bite, so an early poll can see the OLD process
+                  # still running and report a success that never happened.
+                  # Uptime proves the process is actually new.
                   for attempt in $(seq 1 20); do
                     sleep 10
-                    state=$(curl -sS \
+                    body=$(curl -sS \
                       "${PANEL%/}/api/client/servers/${SERVER}/resources" \
                       -H "Authorization: Bearer ${KEY}" \
-                      -H "Accept: application/vnd.pterodactyl.v1+json" \
-                      | jq -r '.attributes.current_state // "unknown"')
-                    echo "attempt ${attempt}: ${state}"
-                    if [ "$state" = "running" ]; then
-                      echo "Deployed and running."
+                      -H "Accept: application/vnd.pterodactyl.v1+json")
+                    state=$(echo "$body" | jq -r '.attributes.current_state // "unknown"')
+                    uptime_ms=$(echo "$body" | jq -r '.attributes.resources.uptime // 0')
+                    echo "attempt ${attempt}: state=${state} uptime=${uptime_ms}ms"
+
+                    if [ "$state" = "running" ] && [ "$uptime_ms" -gt 0 ] \
+                       && [ "$uptime_ms" -lt "$MAX_FRESH_UPTIME_MS" ]; then
+                      echo "Deployed: fresh process, up $((uptime_ms / 1000))s."
                       exit 0
                     fi
                     if [ "$state" = "offline" ] && [ "$attempt" -gt 6 ]; then
@@ -112,5 +117,5 @@ jobs:
                       exit 1
                     fi
                   done
-                  echo "::error::Server never reached 'running' (last state: ${state})."
+                  echo "::error::No fresh running process after ~200s (last: state=${state} uptime=${uptime_ms}ms)."
                   exit 1
