@@ -1,0 +1,11 @@
+{
+  "servers": [
+    {
+      "name": "TestServer",
+      "url": "http://127.0.0.1:1/tiles/players.json"
+    }
+  ],
+  "pollIntervalOnlineSeconds": 30,
+  "pollIntervalOfflineSeconds": 120,
+  "loggingEnabled": false
+}

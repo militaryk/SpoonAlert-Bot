@@ -1,10 +1,12 @@
 node_modules
 .vscode
 .env
-config.json
-userConfigs.json
-afkAlerts.json
-afkTracking.json
+# Leading slash matters: an unanchored "config.json" also matches
+# test/fixtures/config.json, which must be committed.
+/config.json
+/userConfigs.json
+/afkAlerts.json
+/afkTracking.json
 
 # Quarantined state files and in-flight atomic writes
 *.corrupt-*
