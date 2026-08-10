@@ -1,0 +1,8 @@
+# The repository already stores LF; this pins it so a Windows checkout can
+# never commit CRLF back, and silences the "LF will be replaced by CRLF"
+# warning on every add. The bot deploys to a Linux container, where LF is what
+# the shebang-free entrypoint and the egg's shell commands expect anyway.
+* text=auto eol=lf
+
+# Keep the lockfile byte-identical to what npm writes.
+package-lock.json -diff

@@ -32,9 +32,11 @@ jobs:
                 # works on the newer runtime cannot reach the server unnoticed.
                 node-version: ['18', '22']
         steps:
-            - uses: actions/checkout@v4
+            # v7 runs on the node24 runtime; v4 targeted node20, which GitHub
+            # has deprecated and force-migrates with a warning on every run.
+            - uses: actions/checkout@v7
 
-            - uses: actions/setup-node@v4
+            - uses: actions/setup-node@v7
               with:
                   node-version: ${{ matrix.node-version }}
                   cache: npm
