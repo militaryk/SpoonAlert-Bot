@@ -55,7 +55,7 @@ function setAfkDetection(userCfg, enabled, minutes) {
     }
 }
 
-/** Is this a threshold the AFK detector will accept? */
+/** Is this an idle time the AFK filter will accept? */
 function isValidAfkThreshold(minutes) {
     return (
         Number.isInteger(minutes) &&

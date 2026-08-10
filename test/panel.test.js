@@ -89,10 +89,55 @@ test('toggle buttons show their state in both label and colour', () => {
     );
     const buttons = buttonsById(view);
 
-    assert.equal(buttons[TOGGLE.DETECTION].label, 'Disconnect: On');
+    assert.equal(buttons[TOGGLE.DETECTION].label, 'Leave alerts: On');
     assert.equal(buttons[TOGGLE.DETECTION].style, SUCCESS, 'green when on');
-    assert.equal(buttons[TOGGLE.JOIN].label, 'Join: Off');
+    assert.equal(buttons[TOGGLE.JOIN].label, 'Join alerts: Off');
     assert.equal(buttons[TOGGLE.JOIN].style, SECONDARY, 'grey when off');
+});
+
+test('no button promises a notification for going AFK', () => {
+    // The old "AFK detect" label implied a DM when the player stops moving.
+    // It does the opposite now: it filters leave alerts.
+    const view = panel.renderPanel(baseConfig({ player: { name: 'Steve' } }), undefined);
+    const labels = Object.values(buttonsById(view)).map(b => b.label);
+
+    assert.ok(!labels.includes('AFK detect: On'), 'old misleading label is gone');
+    assert.ok(
+        labels.some(l => l.startsWith('AFK-only')),
+        `expected an AFK-only toggle, got: ${labels.join(', ')}`
+    );
+});
+
+test('the panel states the combined leave rule as one sentence', () => {
+    // Two interacting booleans are hard to read as two separate fields, so the
+    // embed spells out the resulting behaviour instead.
+    const rule = cfg => {
+        const field = panel
+            .renderPanel(cfg, undefined)
+            .embeds[0].fields.find(f => f.name === 'Tell me when they leave');
+        return field.value;
+    };
+
+    assert.equal(
+        rule(baseConfig({ player: { name: 'Steve' }, detection: true, afkDetection: false })),
+        'Any disconnect'
+    );
+    assert.equal(
+        rule(
+            baseConfig({
+                player: { name: 'Steve' },
+                detection: true,
+                afkDetection: true,
+                afkThresholdMinutes: 15
+            })
+        ),
+        'Only if AFK 15+ min',
+        'AFK-only overrides the plain leave alert'
+    );
+    assert.equal(
+        rule(baseConfig({ player: { name: 'Steve' }, detection: false, afkDetection: false })),
+        'Off'
+    );
 });
 
 test('the admin button only appears for admins', () => {

@@ -2,7 +2,14 @@
 
 const { servers, log, logError, POLL_ONLINE_MS, POLL_OFFLINE_MS } = require('./config');
 const { store, saveUserConfigs, saveAfkAlerts, saveAfkTracking } = require('./store');
-const { hasMoved, hasActiveAlert, pruneExpiredAlerts } = require('./lib/afk');
+const {
+    hasMoved,
+    hasActiveAlert,
+    isAfk,
+    idleMinutes,
+    disconnectAlertKind,
+    pruneExpiredAlerts
+} = require('./lib/afk');
 const { sendDm } = require('./discord/client');
 
 const FETCH_TIMEOUT_MS = 10000;
@@ -38,13 +45,15 @@ function cleanupAfkAlerts() {
     const { changed, emptiedUsers } = pruneExpiredAlerts(store.afkAlerts);
 
     for (const uid of emptiedUsers) {
-        // Only disable detection if persistentDetection is false
+        // Only disable leave alerts if persistentDetection is false
         if (store.userConfigs[uid] && !store.userConfigs[uid].persistentDetection) {
             store.userConfigs[uid].detection = false;
             saveUserConfigs();
+            // This used to point at /afk-alert and /alert-enable, which stopped
+            // existing when the twelve commands became panel buttons.
             sendDm(
                 uid,
-                'Your AFK alert period has expired. Player disconnect detection is now disabled. Use `/afk-alert` or `/alert-enable` to re-enable.'
+                'Your AFK timer has expired, so leave alerts are off again. Run `/spoon` to turn them back on or start a new timer.'
             );
         }
     }
@@ -115,8 +124,14 @@ async function fetchPlayers(serverObj) {
     }
 }
 
-/** Track standing-still time for one player and alert once per idle streak. */
-async function updateAfkTracking(discordUserId, userCfg, playerName, serverName, player) {
+/**
+ * Track standing-still time for one player.
+ *
+ * This deliberately never notifies. Going AFK is the normal state for an AFK
+ * farm, so a DM every time someone stops moving is pure noise; the idle state
+ * is recorded here and only consulted if the player later disconnects.
+ */
+function updateAfkTracking(discordUserId, userCfg, playerName, serverName, player) {
     if (!store.afkTracking[discordUserId]) store.afkTracking[discordUserId] = {};
 
     const afkKey = `${playerName}|${serverName}`;
@@ -131,43 +146,33 @@ async function updateAfkTracking(discordUserId, userCfg, playerName, serverName,
             y: currentPos.y,
             z: currentPos.z,
             lastMoved: now,
-            alerted: false
+            afk: false
         };
         saveAfkTracking();
         return;
     }
 
     if (hasMoved(tracked, currentPos)) {
-        // Player moved - update position, reset timer, and re-arm the alert so
-        // the next idle streak notifies again.
         tracked.x = currentPos.x;
         tracked.y = currentPos.y;
         tracked.z = currentPos.z;
         tracked.lastMoved = now;
-        tracked.alerted = false;
+        if (tracked.afk) {
+            tracked.afk = false;
+            log(`Player "${playerName}" is active again on "${serverName}" (user ${discordUserId}).`);
+        }
         saveAfkTracking();
         return;
     }
 
-    // Threshold is read live so /afk-enable takes effect on a player who is
+    // Threshold is read live so a change takes effect on a player who is
     // already standing still.
-    const timeSinceLastMove = now - tracked.lastMoved;
-    const afkThresholdMs = userCfg.afkThresholdMinutes * 60 * 1000;
-
-    // `alerted` latches until the player actually moves. This used to reset
-    // lastMoved instead, which left the position unchanged -- so it re-fired
-    // every threshold forever (~96 DMs overnight at 5 minutes) and every
-    // message after the first misreported the idle time as one threshold.
-    if (timeSinceLastMove >= afkThresholdMs && !tracked.alerted) {
-        const afkMinutes = Math.floor(timeSinceLastMove / 60000);
+    const nowAfk = isAfk(tracked, userCfg.afkThresholdMinutes, now);
+    if (nowAfk !== Boolean(tracked.afk)) {
+        tracked.afk = nowAfk;
         log(
-            `AFK detection: Player "${playerName}" has been AFK for ${afkMinutes} minutes on server "${serverName}" (user ${discordUserId}). Sending DM.`
+            `Player "${playerName}" is now AFK on "${serverName}" after ${idleMinutes(tracked, now)} minutes (user ${discordUserId}).`
         );
-        await sendDm(
-            discordUserId,
-            `🚨 **AFK Alert**: Player **${playerName}** has been inactive for ${afkMinutes} minutes on ${serverName}.\nLast position: X:${Math.round(tracked.x)}, Y:${Math.round(tracked.y)}, Z:${Math.round(tracked.z)}`
-        );
-        tracked.alerted = true;
         saveAfkTracking();
     }
 }
@@ -279,8 +284,15 @@ async function checkPlayerStatus() {
                 const firstObservation = previouslyOnline === undefined;
                 lastSeenOnline.set(key, online);
 
+                // Read the idle state BEFORE tracking is dropped for an offline
+                // player -- it is the only evidence of whether they were AFK at
+                // the moment they dropped.
+                const trackedRecord = (store.afkTracking[discordUserId] || {})[key];
+                const wasAfk = Boolean(trackedRecord && trackedRecord.afk);
+                const wasIdleFor = idleMinutes(trackedRecord);
+
                 if (userCfg.afkDetection && online) {
-                    await updateAfkTracking(discordUserId, userCfg, playerName, serverName, player);
+                    updateAfkTracking(discordUserId, userCfg, playerName, serverName, player);
                 } else if (!online) {
                     dropAfkTracking(discordUserId, playerName, serverName);
                 }
@@ -302,19 +314,24 @@ async function checkPlayerStatus() {
                 }
 
                 // --- Disconnect alerts ---
-                // One message per disconnect. The AFK-alert branch used to fetch
-                // the user, log "Sending AFK DM" and then send nothing; users only
-                // ever got a DM because the generic branch has a strictly weaker
-                // condition and fired in the same iteration. These are now
-                // mutually exclusive, and the AFK branch sends its own message.
-                const disconnected = userCfg.detection && previouslyOnline && !online;
+                // Exactly one message per disconnect, chosen by a single pure
+                // decision so the rules stay testable and cannot drift.
                 const userAlerts = store.afkAlerts[discordUserId];
-                const afkAlertActive =
-                    userAlerts && userAlerts[key] && userAlerts[key].expiresAt > Date.now();
+                const kind =
+                    previouslyOnline && !online
+                        ? disconnectAlertKind({
+                              afkAlertActive: Boolean(
+                                  userAlerts && userAlerts[key] && userAlerts[key].expiresAt > Date.now()
+                              ),
+                              afkDetection: userCfg.afkDetection,
+                              wasAfk,
+                              detection: userCfg.detection
+                          })
+                        : null;
 
-                if (disconnected && afkAlertActive) {
+                if (kind === 'timer') {
                     log(
-                        `AFK alert: Player "${playerName}" disconnected from server "${serverName}" (user ${discordUserId}). Sending AFK DM.`
+                        `AFK timer: Player "${playerName}" disconnected from server "${serverName}" (user ${discordUserId}). Sending DM.`
                     );
                     await sendDm(
                         discordUserId,
@@ -325,7 +342,15 @@ async function checkPlayerStatus() {
                         delete store.afkAlerts[discordUserId];
                     }
                     saveAfkAlerts();
-                } else if (disconnected) {
+                } else if (kind === 'afk') {
+                    log(
+                        `AFK disconnect: Player "${playerName}" dropped from "${serverName}" after ${wasIdleFor} idle minutes (user ${discordUserId}). Sending DM.`
+                    );
+                    await sendDm(
+                        discordUserId,
+                        `💤 **AFK disconnect**: **${playerName}** had been standing still for ${wasIdleFor} minute${wasIdleFor === 1 ? '' : 's'} and has now disconnected from ${serverName}.`
+                    );
+                } else if (kind === 'plain') {
                     log(
                         `Disconnect alert: Player "${playerName}" disconnected from server "${serverName}" (user ${discordUserId}). Sending DM.`
                     );

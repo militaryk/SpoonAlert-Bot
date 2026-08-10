@@ -59,11 +59,12 @@ async function handleComponent(interaction) {
         case TOGGLE.AFK: {
             const enabled = !userCfg.afkDetection;
             actions.setAfkDetection(userCfg, enabled, userCfg.afkThresholdMinutes);
-            // Position history is meaningless once detection is off.
+            // Position history is meaningless once AFK-only is off.
             if (!enabled && actions.clearAfkTracking(store.afkTracking, userId)) {
                 saveAfkTracking();
             }
             saveUserConfigs();
+            log(`Panel: ${interaction.user.tag} set AFK-only leave alerts ${enabled ? 'on' : 'off'}.`);
             return interaction.update(mainView(interaction, userCfg));
         }
 
@@ -143,7 +144,7 @@ async function handleComponent(interaction) {
             }
             actions.setAfkDetection(userCfg, true, minutes);
             saveUserConfigs();
-            log(`Panel: ${interaction.user.tag} set the AFK threshold to ${minutes}m.`);
+            log(`Panel: ${interaction.user.tag} set the AFK idle time to ${minutes}m.`);
             return interaction.update(mainView(interaction, userCfg));
         }
 

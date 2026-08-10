@@ -41,10 +41,10 @@ This will trigger a disconnect alert from the bot, even if the player is still o
 ## Features
 
 - **One dashboard:** `/spoon` opens a private panel with buttons for everything. No commands to memorise.
-- **Player Disconnect Alerts:** Get notified when your tracked player leaves the server.
+- **Leave Alerts:** Get notified when your tracked player leaves the server.
+- **AFK-only Mode:** Narrow those down to leaves that happened while your player was standing still, so logging off on purpose stays quiet.
 - **Player Join Alerts:** Get notified when your tracked player joins the server.
-- **AFK Detection:** Get notified when your player hasn't moved for a specified time period.
-- **AFK Alerts:** Temporarily enable disconnect alerts for a set time.
+- **AFK Timer:** Temporarily watch for a leave over a set number of hours.
 - **Easy Setup:** Configure via environment variables and `config.json`.
 - **Multi-server Support:** Monitor players across multiple Minecraft servers.
 - **Admin Commands:** Add/remove servers and admin roles via Discord.
@@ -57,15 +57,15 @@ Run `/spoon`. The panel is private — only you can see it or click its buttons 
 reflects your current settings.
 
 ```
-+------------------------------------------------+
-|  SpoonAlert                                    |
-|  Monitored player   **Steve** on `SurvivalSMP` |
-|  Disconnect  On     Join  Off                  |
-|  AFK detection  On (10 min)   Persistent  Off  |
-|  AFK alert  3h 20m left (1 server)             |
-+------------------------------------------------+
-[Disconnect: On][Join: Off][AFK detect: On][Persistent: Off]
-[Change player][Stop monitoring][AFK timer][AFK threshold]
++--------------------------------------------------+
+|  SpoonAlert                                      |
+|  Monitored player       Steve on SurvivalSMP     |
+|  Tell me when they leave   Only if AFK 10+ min   |
+|  Join alerts  Off       Persistent  Off          |
+|  AFK alert    3h 20m left (1 server)             |
++--------------------------------------------------+
+[Leave alerts: On][AFK-only: On][Join alerts: Off][Persistent: Off]
+[Change player][Stop monitoring][AFK timer][Idle time]
 [Refresh][Servers][Admin*]
 ```
 
@@ -294,14 +294,30 @@ There are only seven commands — everything a normal user needs lives on the `/
 
 | Control            | What it does                                              |
 |--------------------|-----------------------------------------------------------|
-| **Disconnect**     | DM you when your player leaves the server.                |
-| **Join**           | DM you when your player comes online.                     |
-| **AFK detect**     | DM you when your player stops moving.                     |
-| **Persistent**     | Keep disconnect alerts on even while your player is offline. |
+| **Leave alerts**   | DM you when your player leaves the server.                |
+| **AFK-only**       | Narrow those down to leaves that happened while your player was standing still. |
+| **Join alerts**    | DM you when your player comes online.                     |
+| **Persistent**     | Keep leave alerts on even while your player is offline.   |
 | **Change player**  | Set which Minecraft username to watch.                    |
 | **Stop monitoring**| Clear your player and all its alert state.                |
-| **AFK timer**      | Watch for a disconnect for a set number of hours (up to a week). |
-| **AFK threshold**  | How long standing still counts as AFK (1–60 minutes).     |
+| **AFK timer**      | Watch for a leave over a set number of hours (up to a week). |
+| **Idle time**      | How long standing still counts as AFK (1–60 minutes).     |
+
+### AFK-only, explained
+
+**You are never DMed for going AFK.** Standing still is the normal state of an AFK farm, so
+being told about it every time would be noise. Instead, idleness is remembered and used to
+decide whether a *disconnect* is worth telling you about:
+
+| AFK-only | What happened | Result |
+|---|---|---|
+| On | Idle 20 min, then dropped | 💤 **alert** |
+| On | Playing actively, then logged off | silent |
+| Off | Any disconnect at all | alert |
+
+So with it on you hear about the AFK farm getting kicked, and not about yourself logging off
+for the night. An **AFK timer** overrides this — arming one is an explicit "tell me if they
+drop during this window", so it fires either way.
 
 > **Upgrading from an older version?** The twelve commands these buttons replace
 > (`/alert-*`, `/player-*`, `/join-*`, `/afk-*`, `/server-list`) are gone. Command registration

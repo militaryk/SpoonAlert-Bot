@@ -59,15 +59,21 @@ function renderPanel(userCfg, userAlerts, { isAdmin = false } = {}) {
     const hasPlayer = Boolean(userCfg.player);
     const alertSummary = afkAlertSummary(userAlerts);
 
+    // The two disconnect toggles interact, so state them as one sentence
+    // rather than as two booleans the reader has to combine themselves.
+    let disconnectRule;
+    if (userCfg.afkDetection) {
+        disconnectRule = `Only if AFK ${userCfg.afkThresholdMinutes}+ min`;
+    } else if (userCfg.detection) {
+        disconnectRule = 'Any disconnect';
+    } else {
+        disconnectRule = 'Off';
+    }
+
     const fields = [
         { name: 'Monitored player', value: describePlayer(userCfg) },
-        { name: 'Disconnect alerts', value: onOff(userCfg.detection), inline: true },
+        { name: 'Tell me when they leave', value: disconnectRule, inline: true },
         { name: 'Join alerts', value: onOff(userCfg.joinNotify), inline: true },
-        {
-            name: 'AFK detection',
-            value: userCfg.afkDetection ? `On (${userCfg.afkThresholdMinutes} min)` : 'Off',
-            inline: true
-        },
         { name: 'Persistent', value: onOff(userCfg.persistentDetection), inline: true }
     ];
 
@@ -88,9 +94,12 @@ function renderPanel(userCfg, userAlerts, { isAdmin = false } = {}) {
     // Toggles are pointless without a player to apply them to, so they stay
     // disabled until one is set.
     const toggles = new ActionRowBuilder().addComponents(
-        toggleButton(TOGGLE.DETECTION, 'Disconnect', userCfg.detection, !hasPlayer),
-        toggleButton(TOGGLE.JOIN, 'Join', userCfg.joinNotify, !hasPlayer),
-        toggleButton(TOGGLE.AFK, 'AFK detect', userCfg.afkDetection, !hasPlayer),
+        toggleButton(TOGGLE.DETECTION, 'Leave alerts', userCfg.detection, !hasPlayer),
+        // Renamed from "AFK detect", which implied a notification when the
+        // player goes idle. It does the opposite: it filters leave alerts down
+        // to the ones that happened while they were standing still.
+        toggleButton(TOGGLE.AFK, 'AFK-only', userCfg.afkDetection, !hasPlayer),
+        toggleButton(TOGGLE.JOIN, 'Join alerts', userCfg.joinNotify, !hasPlayer),
         toggleButton(TOGGLE.PERSIST, 'Persistent', userCfg.persistentDetection, !hasPlayer)
     );
 
@@ -111,7 +120,7 @@ function renderPanel(userCfg, userAlerts, { isAdmin = false } = {}) {
             .setDisabled(!hasPlayer),
         new ButtonBuilder()
             .setCustomId(VIEW.AFK_THRESHOLD)
-            .setLabel('AFK threshold')
+            .setLabel('Idle time')
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(!hasPlayer)
     );
@@ -186,10 +195,12 @@ function renderAfkThreshold(userCfg) {
     return {
         embeds: [
             {
-                title: 'AFK threshold',
+                title: 'Idle time',
                 description:
-                    'How long your player must stand still before you get an AFK warning.\n' +
-                    'Choosing a value also switches AFK detection on.',
+                    'How long your player must stand still before they count as AFK.\n' +
+                    'Choosing a value also switches **AFK-only** on.\n\n' +
+                    'You are never messaged for going AFK — this only decides which ' +
+                    'disconnects are worth telling you about.',
                 color: COLOR_OFF
             }
         ],

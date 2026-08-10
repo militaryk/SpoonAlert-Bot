@@ -16,12 +16,14 @@ const HELP_FIELDS = [
         name: '/spoon',
         value:
             'Your dashboard. Set the player you want to watch, then toggle alerts from the buttons:\n' +
-            '• **Disconnect** — DM when your player leaves\n' +
-            '• **Join** — DM when they come online\n' +
-            '• **AFK detect** — DM when they stop moving\n' +
-            '• **Persistent** — keep disconnect alerts on even while your player is offline\n' +
-            '• **AFK timer** — watch for a disconnect for a set number of hours\n' +
-            '• **AFK threshold** — how long standing still counts as AFK'
+            '• **Leave alerts** — DM when your player leaves the server\n' +
+            '• **AFK-only** — narrow those down to leaves that happened while they were ' +
+            'standing still, so logging off on purpose stays quiet\n' +
+            '• **Join alerts** — DM when they come online\n' +
+            '• **Persistent** — keep leave alerts on even while your player is offline\n' +
+            '• **AFK timer** — watch for a leave over a set number of hours\n' +
+            '• **Idle time** — how long standing still counts as AFK\n\n' +
+            'You are never DMed just for going AFK.'
     },
     { name: '/help', value: 'Show this message.' },
     {
