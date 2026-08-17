@@ -8,8 +8,7 @@ const { ephemeralReply } = require('../ui/reply');
 // advertised here for a year without ever existing -- `dead` is hardcoded
 // false in the poller and nothing ever reads it.
 const BOT_DESCRIPTION = `SpoonAlert watches Minecraft players on your server and sends you a DM when they join, disconnect, or go AFK.
-Everything lives in one dashboard: run \`/spoon\` and use the buttons.
-Perfect for AFK warriors and forgetful adventurers!`;
+Everything lives in one dashboard: run \`/spoon\` and use the buttons.`;
 
 const HELP_FIELDS = [
     {
